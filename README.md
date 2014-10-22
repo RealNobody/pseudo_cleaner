@@ -83,9 +83,9 @@ Example:
       expect(something).to work
     end
 
-### Capybara
+### Cucumber
 
-Capybara integration similar to Rspec integration is planned, but not implemented yet.
+Cucumber integration similar to Rspec integration is planned, but not implemented yet.
 
 ### Manual
 
