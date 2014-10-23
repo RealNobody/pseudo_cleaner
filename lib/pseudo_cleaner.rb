@@ -1,4 +1,6 @@
 require "seedling"
+require "colorize"
+require "database_cleaner"
 require "pseudo_cleaner/version"
 require "pseudo_cleaner/configuration"
 require "pseudo_cleaner/table_cleaner"

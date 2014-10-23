@@ -2,12 +2,12 @@ module PseudoCleaner
   class MasterCleaner
     @@suite_cleaner = nil
 
-    CLEANING_STRATEGIES            = [:transaction, :full_truncate, :full_delete, :pseudo_delete, :none]
+    CLEANING_STRATEGIES            = [:transaction, :truncation, :deletion, :pseudo_delete, :none]
     DB_CLEANER_CLEANING_STRATEGIES =
         {
             transaction:   :transaction,
-            full_truncate: :truncation,
-            full_delete:   :deletion,
+            truncation:    :truncation,
+            deletion:      :deletion,
             pseudo_delete: :transaction
         }
     VALID_TEST_TYPES               = [:suite, :test]
@@ -19,8 +19,41 @@ module PseudoCleaner
         @@suite_cleaner
       end
 
+      def start_example(example_class, strategy)
+        pseudo_cleaner_data = {}
+        pseudo_cleaner_data[:test_strategy] = strategy
+
+        unless strategy == :none
+          DatabaseCleaner.strategy = PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES[strategy]
+          unless strategy == :pseudo_delete
+            DatabaseCleaner.start
+          end
+
+          pseudo_cleaner_data[:pseudo_state] = PseudoCleaner::MasterCleaner.start_test strategy
+        end
+
+        example_class.instance_variable_set(:@pseudo_cleaner_data, pseudo_cleaner_data)
+      end
+
+      def end_example(example_class)
+        pseudo_cleaner_data = example_class.instance_variable_get(:@pseudo_cleaner_data)
+
+        unless pseudo_cleaner_data[:test_strategy] == :none
+          unless pseudo_cleaner_data[:test_strategy] == :pseudo_delete
+            DatabaseCleaner.clean
+          end
+
+          case pseudo_cleaner_data[:test_strategy]
+            when :deletion, :truncation
+              PseudoCleaner::MasterCleaner.database_reset
+          end
+
+          pseudo_cleaner_data[:pseudo_state].end
+        end
+      end
+
       def end_suite
-        @@suite_cleaner.end :pseudo_delete
+        @@suite_cleaner.end :pseudo_delete if @@suite_cleaner
       end
 
       def start_test test_strategy

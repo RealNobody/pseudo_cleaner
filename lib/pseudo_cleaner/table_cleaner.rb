@@ -85,6 +85,17 @@ module PseudoCleaner
           table_super_class       = table_super_class.superclass
         end
       end
+
+      @table_is_sequel_model = false
+
+      if Object.const_defined?("Sequel", false) && ActiveRecord.const_defined?("Model", false)
+        table_super_class = table.superclass
+
+        while !@table_is_sequel_model && table_super_class
+          @table_is_sequel_model = (table_super_class == Sequel::Model)
+          table_super_class      = table_super_class.superclass
+        end
+      end
     end
 
     def test_start test_strategy
@@ -101,7 +112,9 @@ module PseudoCleaner
           test_start_active_record test_strategy
         end
 
-        #todo test_start_sequel
+        if @table_is_sequel_model
+          test_start_sequel_model test_strategy
+        end
         # end
 
         if @initial_state.blank? && @options[:output_diagnostics]
@@ -124,6 +137,31 @@ module PseudoCleaner
             @initial_state[date_name] = {
                 column_name: date_column_name,
                 value:       table.maximum(date_column_name)
+            }
+            if @options[:output_diagnostics]
+              PseudoCleaner::Logger.write("    max(#{@initial_state[date_name][:column_name]}) = #{@initial_state[date_name][:value]}")
+            end
+
+            break
+          end
+        end
+      end
+    end
+
+    def test_start_sequel_model test_strategy
+      if table.columns.include?(:id)
+        @initial_state[:max_id] = table.dataset.unfiltered.max(:id)
+        PseudoCleaner::Logger.write("    max(id) = #{@initial_state[:max_id]}") if @options[:output_diagnostics]
+      end
+
+      [:created, :updated].each do |date_name|
+        [:at, :on].each do |verb_name|
+          date_column_name = "#{date_name}_#{verb_name}".to_sym
+
+          if table.columns.include?(date_column_name)
+            @initial_state[date_name] = {
+                column_name: date_column_name,
+                value:       table.dataset.unfiltered.max(date_column_name)
             }
             if @options[:output_diagnostics]
               PseudoCleaner::Logger.write("    max(#{@initial_state[date_name][:column_name]}) = #{@initial_state[date_name][:value]}")
@@ -158,6 +196,10 @@ module PseudoCleaner
         if @table_is_active_record
           test_end_active_record test_strategy
         end
+
+        if @table_is_sequel_model
+          test_end_sequel_model test_strategy
+        end
         # end
       end
     end
@@ -186,6 +228,45 @@ module PseudoCleaner
         dirty_count = table.
             where("#{@initial_state[:updated][:column_name]} > :column_value",
                   column_value: @initial_state[:updated][:value]).count
+
+        if @options[:output_diagnostics] && dirty_count > 0
+          if @options[:output_diagnostics]
+            PseudoCleaner::Logger.write("    *** There are #{dirty_count} dirty records remaining after cleaning \"#{table.name}\"... ***".red.on_light_white)
+          end
+        end
+      end
+
+      #TODO:  Add referential integrity checks
+    end
+
+    def test_end_sequel_model test_strategy
+      if @initial_state[:max_id]
+        the_max     = @initial_state[:max_id] || 0
+        num_deleted = table.dataset.unfiltered.where { id > the_max }.delete
+        if @options[:output_diagnostics]
+          PseudoCleaner::Logger.write("    Deleted #{num_deleted} records by ID.") if num_deleted > 0
+        end
+      end
+
+      if @initial_state[:created]
+        num_deleted = table.
+            dataset.
+            unfiltered.
+            where("`#{@initial_state[:created][:column_name]}` > ?", @initial_state[:created][:value]).
+            delete
+        if num_deleted > 0
+          if @options[:output_diagnostics]
+            PseudoCleaner::Logger.write("    Deleted #{num_deleted} records by #{@initial_state[:created][:column_name]}.")
+          end
+        end
+      end
+
+      if @initial_state[:updated]
+        dirty_count = table.
+            dataset.
+            unfiltered.
+            where("`#{@initial_state[:created][:column_name]}` > ?", @initial_state[:created][:value]).
+            count
 
         if @options[:output_diagnostics] && dirty_count > 0
           if @options[:output_diagnostics]
