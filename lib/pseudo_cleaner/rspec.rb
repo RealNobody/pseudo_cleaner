@@ -1,5 +1,5 @@
 RSpec.configure do |config|
-  config.before(:suite) do
+  config.before(:all) do
     if PseudoCleaner::Configuration.current_instance.clean_database_before_tests
       PseudoCleaner::MasterCleaner.reset_database
     else
@@ -10,7 +10,7 @@ RSpec.configure do |config|
     DatabaseCleaner.strategy = :transaction
   end
 
-  config.after(:suite) do
+  config.after(:all) do
     # We end suite in case a custom cleaner wants/needs to.
     PseudoCleaner::MasterCleaner.end_suite
   end
