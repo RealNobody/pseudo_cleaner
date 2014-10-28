@@ -8,6 +8,7 @@ module PseudoCleaner
     #   output_diagnostics  - true/false
     #                         if true, the system will use puts to output information about what it is doing...
     attr_accessor :output_diagnostics
+    attr_accessor :clean_database_before_tests
 
     def self.current_instance
       @@current_instance ||= PseudoCleaner::Configuration.new
@@ -15,6 +16,7 @@ module PseudoCleaner
 
     def initialize
       @output_diagnostics = false
+      @clean_database_before_tests = false
     end
 
     #todo add configuration for doing referential integrity checks after run

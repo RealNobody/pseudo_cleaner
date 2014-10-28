@@ -88,7 +88,7 @@ module PseudoCleaner
 
       @table_is_sequel_model = false
 
-      if Object.const_defined?("Sequel", false) && ActiveRecord.const_defined?("Model", false)
+      if Object.const_defined?("Sequel", false) && Sequel.const_defined?("Model", false)
         table_super_class = table.superclass
 
         while !@table_is_sequel_model && table_super_class
@@ -125,7 +125,7 @@ module PseudoCleaner
 
     def test_start_active_record test_strategy
       if table.columns.find { |column| column.name == "id" }
-        @initial_state[:max_id] = table.maximum(:id)
+        @initial_state[:max_id] = table.maximum(:id) || 0
         PseudoCleaner::Logger.write("    max(id) = #{@initial_state[:max_id]}") if @options[:output_diagnostics]
       end
 
@@ -136,7 +136,7 @@ module PseudoCleaner
           if table.columns.find { |column| column.name == date_column_name }
             @initial_state[date_name] = {
                 column_name: date_column_name,
-                value:       table.maximum(date_column_name)
+                value:       table.maximum(date_column_name) || Time.now - 1.second
             }
             if @options[:output_diagnostics]
               PseudoCleaner::Logger.write("    max(#{@initial_state[date_name][:column_name]}) = #{@initial_state[date_name][:value]}")
@@ -150,7 +150,7 @@ module PseudoCleaner
 
     def test_start_sequel_model test_strategy
       if table.columns.include?(:id)
-        @initial_state[:max_id] = table.dataset.unfiltered.max(:id)
+        @initial_state[:max_id] = table.dataset.unfiltered.max(:id) || 0
         PseudoCleaner::Logger.write("    max(id) = #{@initial_state[:max_id]}") if @options[:output_diagnostics]
       end
 
@@ -161,7 +161,7 @@ module PseudoCleaner
           if table.columns.include?(date_column_name)
             @initial_state[date_name] = {
                 column_name: date_column_name,
-                value:       table.dataset.unfiltered.max(date_column_name)
+                value:       table.dataset.unfiltered.max(date_column_name) || Time.now - 1.second
             }
             if @options[:output_diagnostics]
               PseudoCleaner::Logger.write("    max(#{@initial_state[date_name][:column_name]}) = #{@initial_state[date_name][:value]}")

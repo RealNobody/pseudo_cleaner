@@ -1,9 +1,19 @@
-if true
-  # before tests run...
-  PseudoCleaner::MasterCleaner.reset_database
+first_test_run = false
+Cucumber::Rails::Database.autorun_database_cleaner = false
 
-  # We start suite in case a custom cleaner wants/needs to.
-  DatabaseCleaner.strategy = :transaction
+Before do |scenario|
+  unless first_test_run
+    first_test_run = true
+    # before tests run...
+    # We start suite in case a custom cleaner wants/needs to.
+    if PseudoCleaner::Configuration.current_instance.clean_database_before_tests
+      PseudoCleaner::MasterCleaner.reset_database
+    else
+      PseudoCleaner::MasterCleaner.start_suite
+    end
+
+    DatabaseCleaner.strategy                           = :transaction
+  end
 end
 
 Before("~@truncation", "~@deletion") do |scenario|
