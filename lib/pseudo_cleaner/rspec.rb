@@ -16,7 +16,7 @@ RSpec.configure do |config|
   end
 
   config.before(:each) do |example|
-    example = examle.example if example.respond_to?(:example)
+    example = example.example if example.respond_to?(:example)
 
     new_strategy = example.metadata[:strategy]
 
@@ -34,6 +34,8 @@ RSpec.configure do |config|
   end
 
   config.after(:each) do |example|
+    example = example.example if example.respond_to?(:example)
+
     PseudoCleaner::MasterCleaner.end_example(example)
   end
 end
