@@ -20,7 +20,7 @@ module PseudoCleaner
       end
 
       def start_example(example_class, strategy)
-        pseudo_cleaner_data = {}
+        pseudo_cleaner_data                 = {}
         pseudo_cleaner_data[:test_strategy] = strategy
 
         unless strategy == :none
@@ -132,9 +132,17 @@ module PseudoCleaner
 
     def create_table_cleaners(options = {})
       Seedling::Seeder.create_order.each do |table|
-        cleaner_class = PseudoCleaner::TableCleaner.cleaner_class(table)
+        cleaner_class = PseudoCleaner::TableCleaner.cleaner_class(table.name)
         if cleaner_class
           @cleaners << cleaner_class.new("#{@test_type}_start".to_sym, "#{@test_type}_end".to_sym, table, options)
+        end
+      end
+      if Seedling::Seeder.respond_to?(:unclassed_tables)
+        Seedling::Seeder.unclassed_tables.each do |table_name|
+          cleaner_class = PseudoCleaner::TableCleaner.cleaner_class(table_name)
+          if cleaner_class
+            @cleaners << cleaner_class.new("#{@test_type}_start".to_sym, "#{@test_type}_end".to_sym, table_name, options)
+          end
         end
       end
     end

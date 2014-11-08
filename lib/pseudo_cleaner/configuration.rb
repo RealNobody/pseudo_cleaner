@@ -9,6 +9,7 @@ module PseudoCleaner
     #                         if true, the system will use puts to output information about what it is doing...
     attr_accessor :output_diagnostics
     attr_accessor :clean_database_before_tests
+    attr_accessor :reset_auto_increment
 
     def self.current_instance
       @@current_instance ||= PseudoCleaner::Configuration.new
@@ -17,6 +18,7 @@ module PseudoCleaner
     def initialize
       @output_diagnostics = false
       @clean_database_before_tests = false
+      @reset_auto_increment = false
     end
 
     #todo add configuration for doing referential integrity checks after run

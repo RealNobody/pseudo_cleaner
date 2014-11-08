@@ -1,14 +1,15 @@
 module PseudoCleaner
   class TableCleaner
-    attr_accessor :table
+    attr_accessor :table,
+                  :table_name
 
     VALID_START_METHODS = [:test_start, :suite_start]
     VALID_END_METHODS   = [:test_end, :suite_end]
     VALID_TEST_METHODS  = VALID_START_METHODS + VALID_END_METHODS
 
     class << self
-      def cleaner_class(table)
-        seed_class_name      = "#{table.name}Cleaner"
+      def cleaner_class(table_name)
+        seed_class_name      = "#{table_name.to_s.classify}Cleaner"
         seed_class_base_name = seed_class_name.demodulize
         base_module          = seed_class_name.split("::")[0..-2].join("::")
         base_module_classes  = [Object]
@@ -78,22 +79,34 @@ module PseudoCleaner
       @table_is_active_record = false
 
       if Object.const_defined?("ActiveRecord", false) && ActiveRecord.const_defined?("Base", false)
-        table_super_class = table.superclass
+        if table.is_a?(String) || table.is_a?(Symbol)
+          @table_is_active_record = true
+          @table_name             = table
+        else
+          table_super_class = table.superclass
 
-        while !@table_is_active_record && table_super_class
-          @table_is_active_record = (table_super_class == ActiveRecord::Base)
-          table_super_class       = table_super_class.superclass
+          while !@table_is_active_record && table_super_class
+            @table_is_active_record = (table_super_class == ActiveRecord::Base)
+            @table_name             = table.name if @table_is_active_record
+            table_super_class       = table_super_class.superclass
+          end
         end
       end
 
       @table_is_sequel_model = false
 
       if Object.const_defined?("Sequel", false) && Sequel.const_defined?("Model", false)
-        table_super_class = table.superclass
+        if table.is_a?(String) || table.is_a?(Symbol)
+          @table_is_sequel_model = Sequel::DATABASES[0][table]
+          @table_name            = table
+        else
+          table_super_class = table.superclass
 
-        while !@table_is_sequel_model && table_super_class
-          @table_is_sequel_model = (table_super_class == Sequel::Model)
-          table_super_class      = table_super_class.superclass
+          while !@table_is_sequel_model && table_super_class
+            @table_is_sequel_model = (table_super_class == Sequel::Model)
+            @table_name            = table.name if @table_is_sequel_model
+            table_super_class      = table_super_class.superclass
+          end
         end
       end
     end
@@ -103,11 +116,10 @@ module PseudoCleaner
       @test_strategy = test_strategy
 
       if test_strategy == :pseudo_delete
-        PseudoCleaner::Logger.write("  Gathering information about \"#{table.name}\"...".blue.on_light_white) if @options[:output_diagnostics]
+        if @options[:output_diagnostics]
+          PseudoCleaner::Logger.write("  Gathering information about \"#{table_name}\"...".blue.on_light_white)
+        end
 
-        # if table.respond_to?(@options[:table_start_method])
-        #   @initial_state = table.send @options[:table_start_method]
-        # else
         if @table_is_active_record
           test_start_active_record test_strategy
         end
@@ -115,42 +127,57 @@ module PseudoCleaner
         if @table_is_sequel_model
           test_start_sequel_model test_strategy
         end
-        # end
 
-        if @initial_state.blank? && @options[:output_diagnostics]
-          PseudoCleaner::Logger.write("    *** There are no columns to track inserts and updates easily on for #{table.name} ***".red.on_light_white)
+        reset_auto_increment true
+
+        if @initial_state.has_key?(:count) && @options[:output_diagnostics]
+          PseudoCleaner::Logger.write("    *** There are no columns to track inserts and updates easily on for #{table_name} ***".red.on_light_white)
         end
       end
     end
 
     def test_start_active_record test_strategy
-      if table.columns.find { |column| column.name == "id" }
-        @initial_state[:max_id] = table.maximum(:id) || 0
-        PseudoCleaner::Logger.write("    max(id) = #{@initial_state[:max_id]}") if @options[:output_diagnostics]
-      end
+      if table.is_a?(String) || table.is_a?(Symbol)
+        # TODO: do this
+        raise "This isn't done yet"
+      else
+        if columns.find { |column| column.name == "id" }
+          @initial_state[:max_id] = table.maximum(:id) || 0
+          PseudoCleaner::Logger.write("    max(id) = #{@initial_state[:max_id]}") if @options[:output_diagnostics]
+        end
 
-      [:created, :updated].each do |date_name|
-        [:at, :on].each do |verb_name|
-          date_column_name = "#{date_name}_#{verb_name}"
+        [:created, :updated].each do |date_name|
+          [:at, :on].each do |verb_name|
+            date_column_name = "#{date_name}_#{verb_name}"
 
-          if table.columns.find { |column| column.name == date_column_name }
-            @initial_state[date_name] = {
-                column_name: date_column_name,
-                value:       table.maximum(date_column_name) || Time.now - 1.second
-            }
-            if @options[:output_diagnostics]
-              PseudoCleaner::Logger.write("    max(#{@initial_state[date_name][:column_name]}) = #{@initial_state[date_name][:value]}")
+            if columns.find { |column| column.name == date_column_name }
+              @initial_state[date_name] = {
+                  column_name: date_column_name,
+                  value:       table.maximum(date_column_name) || Time.now - 1.second
+              }
+              if @options[:output_diagnostics]
+                PseudoCleaner::Logger.write("    max(#{@initial_state[date_name][:column_name]}) = #{@initial_state[date_name][:value]}")
+              end
+
+              break
             end
-
-            break
           end
         end
+      end
+
+      if @initial_state.blank?
+        # TODO: do this
+        raise "this isn't done yet"
+
+        # @initial_state[:count] = access_table.count
       end
     end
 
     def test_start_sequel_model test_strategy
-      if table.columns.include?(:id)
-        @initial_state[:max_id] = table.dataset.unfiltered.max(:id) || 0
+      access_table = sequel_model_table
+
+      if access_table.columns.include?(:id)
+        @initial_state[:max_id] = access_table.unfiltered.max(:id) || 0
         PseudoCleaner::Logger.write("    max(id) = #{@initial_state[:max_id]}") if @options[:output_diagnostics]
       end
 
@@ -158,10 +185,10 @@ module PseudoCleaner
         [:at, :on].each do |verb_name|
           date_column_name = "#{date_name}_#{verb_name}".to_sym
 
-          if table.columns.include?(date_column_name)
+          if access_table.columns.include?(date_column_name)
             @initial_state[date_name] = {
                 column_name: date_column_name,
-                value:       table.dataset.unfiltered.max(date_column_name) || Time.now - 1.second
+                value:       access_table.unfiltered.max(date_column_name) || Time.now - 1.second
             }
             if @options[:output_diagnostics]
               PseudoCleaner::Logger.write("    max(#{@initial_state[date_name][:column_name]}) = #{@initial_state[date_name][:value]}")
@@ -171,11 +198,17 @@ module PseudoCleaner
           end
         end
       end
+
+      if @initial_state.blank?
+        @initial_state[:count] = access_table.unfiltered.count
+      end
     end
 
     def test_end test_strategy
       if @test_strategy != test_strategy
-        PseudoCleaner::Logger.write("  *** The ending strategy for \"#{table.name}\" changed! ***".red.on_light_white) if @options[:output_diagnostics]
+        if @options[:output_diagnostics]
+          PseudoCleaner::Logger.write("  *** The ending strategy for \"#{table_name}\" changed! ***".red.on_light_white)
+        end
       end
 
       if @test_strategy == :pseudo_delete || test_strategy == :pseudo_delete
@@ -188,11 +221,8 @@ module PseudoCleaner
         # I'm using it because it is faster than reseeding each test...
         # And, I can be responsible for worrying about referential integrity in the test
         # if I want to...
-        PseudoCleaner::Logger.write("  Resetting table \"#{table.name}\"...") if @options[:output_diagnostics]
+        PseudoCleaner::Logger.write("  Resetting table \"#{table_name}\"...") if @options[:output_diagnostics]
 
-        # if table.respond_to?(@options[:table_end_method])
-        #   table.send(@options[:table_end_method], @initial_state)
-        # else
         if @table_is_active_record
           test_end_active_record test_strategy
         end
@@ -200,57 +230,83 @@ module PseudoCleaner
         if @table_is_sequel_model
           test_end_sequel_model test_strategy
         end
-        # end
+
+        reset_auto_increment false
       end
     end
 
     def test_end_active_record test_strategy
-      if @initial_state[:max_id]
-        the_max     = @initial_state[:max_id] || 0
-        num_deleted = table.delete_all(["id > :id", id: the_max])
-        if @options[:output_diagnostics]
-          PseudoCleaner::Logger.write("    Deleted #{num_deleted} records by ID.") if num_deleted > 0
-        end
-      end
-
-      if @initial_state[:created]
-        num_deleted = table.
-            delete_all(["#{@initial_state[:created][:column_name]} > :column_value",
-                        column_value: @initial_state[:created][:value]])
-        if num_deleted > 0
+      if table.is_a?(String) || table.is_a?(Symbol)
+        # TODO: do this
+        raise "This isn't done yet"
+      else
+        if @initial_state[:max_id]
+          the_max     = @initial_state[:max_id] || 0
+          num_deleted = table.delete_all(["id > :id", id: the_max])
           if @options[:output_diagnostics]
-            PseudoCleaner::Logger.write("    Deleted #{num_deleted} records by #{@initial_state[:created][:column_name]}.")
+            PseudoCleaner::Logger.write("    Deleted #{num_deleted} records by ID.") if num_deleted > 0
+          end
+        end
+
+        if @initial_state[:created]
+          num_deleted = table.
+              delete_all(["#{@initial_state[:created][:column_name]} > :column_value",
+                          column_value: @initial_state[:created][:value]])
+          if num_deleted > 0
+            if @options[:output_diagnostics]
+              PseudoCleaner::Logger.write("    Deleted #{num_deleted} records by #{@initial_state[:created][:column_name]}.")
+            end
+          end
+        end
+
+        if @initial_state[:updated]
+          dirty_count = table.
+              where("#{@initial_state[:updated][:column_name]} > :column_value",
+                    column_value: @initial_state[:updated][:value]).count
+
+          if @options[:output_diagnostics] && dirty_count > 0
+            if @options[:output_diagnostics]
+              PseudoCleaner::Logger.write("    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{table_name}\"... ***".red.on_light_white)
+            end
           end
         end
       end
 
-      if @initial_state[:updated]
-        dirty_count = table.
-            where("#{@initial_state[:updated][:column_name]} > :column_value",
-                  column_value: @initial_state[:updated][:value]).count
+      if @initial_state[:count]
+        # TODO: do this
+        raise "This isn't done yet"
 
-        if @options[:output_diagnostics] && dirty_count > 0
-          if @options[:output_diagnostics]
-            PseudoCleaner::Logger.write("    *** There are #{dirty_count} dirty records remaining after cleaning \"#{table.name}\"... ***".red.on_light_white)
-          end
-        end
+        # final_count = access_table.unfiltered.count
+        # if @initial_state[:count] == 0
+        #   DatabaseCleaner.clean_with(:truncation, only: [@table_name])
+        #   if @options[:output_diagnostics]
+        #     PseudoCleaner::Logger.write("    Deleted #{final_count} records by cleaning the table.") if final_count > 0
+        #   end
+        #
+        #   final_count = access_table.unfiltered.count
+        # end
+        #
+        # if @initial_state[:count] != final_count
+        #   PseudoCleaner::Logger.write("    *** There are #{final_count - @initial_state[:count]} dirty records remaining after cleaning \"#{table_name}\"... ***".red.on_light_white)
+        # end
       end
 
       #TODO:  Add referential integrity checks
     end
 
     def test_end_sequel_model test_strategy
+      access_table = sequel_model_table
+
       if @initial_state[:max_id]
         the_max     = @initial_state[:max_id] || 0
-        num_deleted = table.dataset.unfiltered.where { id > the_max }.delete
+        num_deleted = access_table.unfiltered.where { id > the_max }.delete
         if @options[:output_diagnostics]
           PseudoCleaner::Logger.write("    Deleted #{num_deleted} records by ID.") if num_deleted > 0
         end
       end
 
       if @initial_state[:created]
-        num_deleted = table.
-            dataset.
+        num_deleted = access_table.
             unfiltered.
             where("`#{@initial_state[:created][:column_name]}` > ?", @initial_state[:created][:value]).
             delete
@@ -262,20 +318,59 @@ module PseudoCleaner
       end
 
       if @initial_state[:updated]
-        dirty_count = table.
-            dataset.
+        dirty_count = access_table.
             unfiltered.
-            where("`#{@initial_state[:created][:column_name]}` > ?", @initial_state[:created][:value]).
+            where("`#{@initial_state[:updated][:column_name]}` > ?", @initial_state[:updated][:value]).
             count
 
         if @options[:output_diagnostics] && dirty_count > 0
           if @options[:output_diagnostics]
-            PseudoCleaner::Logger.write("    *** There are #{dirty_count} dirty records remaining after cleaning \"#{table.name}\"... ***".red.on_light_white)
+            PseudoCleaner::Logger.write("    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{table_name}\"... ***".red.on_light_white)
           end
         end
       end
 
+      if @initial_state[:count]
+        final_count = access_table.unfiltered.count
+        if @initial_state[:count] == 0
+          DatabaseCleaner.clean_with(:truncation, only: [@table_name])
+          if @options[:output_diagnostics]
+            PseudoCleaner::Logger.write("    Deleted #{final_count} records by cleaning the table.") if final_count > 0
+          end
+
+          final_count = access_table.unfiltered.count
+        end
+
+        if @initial_state[:count] != final_count
+          PseudoCleaner::Logger.write("    *** There are #{final_count - @initial_state[:count]} dirty records remaining after cleaning \"#{table_name}\"... ***".red.on_light_white)
+        end
+      end
+
       #TODO:  Add referential integrity checks
+    end
+
+    def reset_auto_increment test_start
+      unless test_start && PseudoCleaner::Configuration.current_instance.clean_database_before_tests
+        if @table_is_active_record
+          reset_auto_increment_active_record
+        end
+
+        if @table_is_sequel_model
+          reset_auto_increment_sequel_model
+        end
+      end
+    end
+
+    def reset_auto_increment_active_record
+      # TODO: do this
+      raise "Not implemented yet"
+    end
+
+    def reset_auto_increment_sequel_model
+      if @initial_state[:max_id]
+        access_table_name = sequel_model_table_name
+        DB["ALTER TABLE `#{sequel_model_table_name}` AUTO_INCREMENT = #{@initial_state[:max_id] + 1}"]
+      end
     end
 
     # for the default methods, suite and test start/end are identical.
@@ -304,6 +399,22 @@ module PseudoCleaner
       end
 
       return -1
+    end
+  end
+
+  def sequel_model_table
+    if table.is_a?(String) || table.is_a?(Symbol)
+      Sequel::DATABASES[0][table]
+    else
+      table.dataset
+    end
+  end
+
+  def sequel_model_table_name
+    if table.is_a?(String) || table.is_a?(Symbol)
+      table
+    else
+      table.name
     end
   end
 end
