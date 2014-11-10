@@ -350,7 +350,8 @@ module PseudoCleaner
     end
 
     def reset_auto_increment test_start
-      unless test_start && PseudoCleaner::Configuration.current_instance.clean_database_before_tests
+      if (test_start && !PseudoCleaner::Configuration.current_instance.clean_database_before_tests) ||
+          (!test_start && PseudoCleaner::Configuration.current_instance.clean_database_before_tests)
         if @table_is_active_record
           reset_auto_increment_active_record
         end
@@ -368,8 +369,10 @@ module PseudoCleaner
 
     def reset_auto_increment_sequel_model
       if @initial_state[:max_id]
-        access_table_name = sequel_model_table_name
-        DB["ALTER TABLE `#{sequel_model_table_name}` AUTO_INCREMENT = #{@initial_state[:max_id] + 1}"]
+        unless sequel_model_table_name.blank?
+          access_table_name = sequel_model_table_name
+          DB["ALTER TABLE #{sequel_model_table_name} AUTO_INCREMENT = #{@initial_state[:max_id] + 1}"].first
+        end
       end
     end
 
@@ -400,21 +403,21 @@ module PseudoCleaner
 
       return -1
     end
-  end
 
-  def sequel_model_table
-    if table.is_a?(String) || table.is_a?(Symbol)
-      Sequel::DATABASES[0][table]
-    else
-      table.dataset
+    def sequel_model_table
+      if table.is_a?(String) || table.is_a?(Symbol)
+        Sequel::DATABASES[0][table]
+      else
+        table.dataset
+      end
     end
-  end
 
-  def sequel_model_table_name
-    if table.is_a?(String) || table.is_a?(Symbol)
-      table
-    else
-      table.name
+    def sequel_model_table_name
+      if table.is_a?(String) || table.is_a?(Symbol)
+        "`#{table}`"
+      else
+        table.simple_table
+      end
     end
   end
 end
