@@ -12,8 +12,13 @@ module PseudoCleaner
         }
     VALID_TEST_TYPES               = [:suite, :test]
 
+    VALID_START_METHODS = [:test_start, :suite_start]
+    VALID_END_METHODS   = [:test_end, :suite_end]
+    VALID_TEST_METHODS  = VALID_START_METHODS + VALID_END_METHODS
+
     class << self
       def start_suite
+        PseudoCleaner::TableCleaner.reset_suite
         @@suite_cleaner = PseudoCleaner::MasterCleaner.new(:suite)
         @@suite_cleaner.start :pseudo_delete
         @@suite_cleaner
@@ -100,6 +105,57 @@ module PseudoCleaner
         PseudoCleaner::Logger.write(error.to_s)
         PseudoCleaner::Logger.write(error.backtrace.join("\n")) if error.backtrace
       end
+
+      def cleaner_class(table_name)
+        seed_class_name      = "#{table_name.to_s.classify}Cleaner"
+        seed_class_base_name = seed_class_name.demodulize
+        base_module          = seed_class_name.split("::")[0..-2].join("::")
+        base_module_classes  = [Object]
+
+        unless base_module.blank?
+          base_module_classes = base_module_classes.unshift base_module.constantize
+        end
+
+        return_class = nil
+        2.times do
+          base_module_classes.each do |base_class|
+            if (base_class.const_defined?(seed_class_base_name, false))
+              if base_class == Object
+                return_class = seed_class_base_name.constantize
+              else
+                return_class = "#{base_class.name}::#{seed_class_base_name}".constantize
+              end
+
+              break
+            end
+          end
+
+          break if return_class
+
+          seeder_file = "db/cleaners/"
+          seeder_file += base_module.split("::").map { |module_name| module_name.underscore }.join("/")
+          seeder_file += "/" unless seeder_file[-1] == "/"
+          seeder_file += seed_class_base_name.underscore
+          seeder_file += ".rb"
+          seeder_file = File.join(Rails.root, seeder_file)
+
+          break unless File.exists?(seeder_file)
+
+          require seeder_file
+        end
+
+        # unless return_class &&
+        #     VALID_TEST_METHODS.any? { |test_method| return_class.instance_methods.include?(test_method.to_sym) }
+        #   return_class = table
+        # end
+
+        unless return_class &&
+            VALID_TEST_METHODS.any? { |test_method| return_class.instance_methods.include?(test_method.to_sym) }
+          return_class = PseudoCleaner::TableCleaner
+        end
+
+        return_class
+      end
     end
 
     def initialize(test_type)
@@ -132,14 +188,14 @@ module PseudoCleaner
 
     def create_table_cleaners(options = {})
       Seedling::Seeder.create_order.each do |table|
-        cleaner_class = PseudoCleaner::TableCleaner.cleaner_class(table.name)
+        cleaner_class = PseudoCleaner::MasterCleaner.cleaner_class(table.name)
         if cleaner_class
           @cleaners << cleaner_class.new("#{@test_type}_start".to_sym, "#{@test_type}_end".to_sym, table, options)
         end
       end
       if Seedling::Seeder.respond_to?(:unclassed_tables)
         Seedling::Seeder.unclassed_tables.each do |table_name|
-          cleaner_class = PseudoCleaner::TableCleaner.cleaner_class(table_name)
+          cleaner_class = PseudoCleaner::MasterCleaner.cleaner_class(table_name)
           if cleaner_class
             @cleaners << cleaner_class.new("#{@test_type}_start".to_sym, "#{@test_type}_end".to_sym, table_name, options)
           end
@@ -171,7 +227,8 @@ module PseudoCleaner
           end
 
           if check_class &&
-              PseudoCleaner::TableCleaner::VALID_TEST_METHODS.any? { |test_method| check_class.instance_methods.include?(test_method) }
+              PseudoCleaner::MasterCleaner::VALID_TEST_METHODS.
+                  any? { |test_method| check_class.instance_methods.include?(test_method) }
             unless @cleaners.any? { |cleaner| check_class.name == cleaner.class.name }
               @cleaners << check_class.new("#{@test_type}_start".to_sym, "#{@test_type}_end".to_sym, nil, options)
             end
