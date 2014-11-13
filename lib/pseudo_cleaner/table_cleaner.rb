@@ -254,9 +254,10 @@ module PseudoCleaner
           if @options[:output_diagnostics] && dirty_count > 0
             # cleaned_table = true
 
-            if @options[:output_diagnostics]
-              PseudoCleaner::Logger.write("    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
-            end
+            initial_state[:updated][:value] = table.maximum(initial_state[:updated][:column_name])
+
+            PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
+            PseudoCleaner::Logger.write("    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
           end
         end
       end
@@ -327,9 +328,10 @@ module PseudoCleaner
         if @options[:output_diagnostics] && dirty_count > 0
           # cleaned_table = true
 
-          if @options[:output_diagnostics]
-            PseudoCleaner::Logger.write("    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
-          end
+          initial_state[:updated][:value] = access_table.unfiltered.max(initial_state[:updated][:column_name])
+
+          PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
+          PseudoCleaner::Logger.write("    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
         end
       end
 
@@ -348,8 +350,9 @@ module PseudoCleaner
 
         if initial_state[:count] != final_count
           initial_state[:count] = final_count
-          cleaned_table = true
+          cleaned_table         = true
 
+          PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
           PseudoCleaner::Logger.write("    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
         end
       end
