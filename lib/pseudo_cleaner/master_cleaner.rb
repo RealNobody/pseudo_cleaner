@@ -30,7 +30,7 @@ module PseudoCleaner
 
         unless strategy == :none
           DatabaseCleaner.strategy = PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES[strategy]
-          unless strategy == :pseudo_delete
+          unless [:pseudo_delete, :transaction].include? strategy
             DatabaseCleaner.start
           end
 
@@ -44,7 +44,7 @@ module PseudoCleaner
         pseudo_cleaner_data = example_class.instance_variable_get(:@pseudo_cleaner_data)
 
         unless pseudo_cleaner_data[:test_strategy] == :none
-          unless pseudo_cleaner_data[:test_strategy] == :pseudo_delete
+          unless [:pseudo_delete, :transaction].include? pseudo_cleaner_data[:test_strategy]
             DatabaseCleaner.clean
           end
 

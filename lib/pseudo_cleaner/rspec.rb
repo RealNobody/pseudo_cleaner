@@ -15,8 +15,8 @@ RSpec.configure do |config|
     PseudoCleaner::MasterCleaner.end_suite
   end
 
-  config.before(:each) do |example|
-    example = example.example if example.respond_to?(:example)
+  config.around(:each) do |run_example|
+    example = run_example.example if run_example.respond_to?(:example)
 
     new_strategy = example.metadata[:strategy]
 
@@ -30,12 +30,16 @@ RSpec.configure do |config|
     end
     new_strategy ||= :transaction
 
-    PseudoCleaner::MasterCleaner.start_example(example, new_strategy)
-  end
-
-  config.after(:each) do |example|
-    example = example.example if example.respond_to?(:example)
-
-    PseudoCleaner::MasterCleaner.end_example(example)
+    if new_strategy != :transaction
+      PseudoCleaner::MasterCleaner.start_example(example, new_strategy)
+      run_example.run
+      PseudoCleaner::MasterCleaner.end_example(example)
+    else
+      PseudoCleaner::MasterCleaner.start_example(example, new_strategy)
+      DatabaseCleaner.cleaning do
+        run_example.run
+      end
+      PseudoCleaner::MasterCleaner.end_example(example)
+    end
   end
 end
