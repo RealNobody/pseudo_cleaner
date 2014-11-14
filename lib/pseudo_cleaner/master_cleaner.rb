@@ -1,6 +1,8 @@
 module PseudoCleaner
   class MasterCleaner
-    @@suite_cleaner = nil
+    @@suite_cleaner          = nil
+    @@cleaner_classes        = nil
+    @@cleaner_classes_sorted = false
 
     CLEANING_STRATEGIES            = [:transaction, :truncation, :deletion, :pseudo_delete, :none]
     DB_CLEANER_CLEANING_STRATEGIES =
@@ -164,17 +166,60 @@ module PseudoCleaner
       @test_type = test_type
     end
 
+    def cleaner_classes
+      unless @@cleaner_classes
+        @@cleaner_classes = []
+
+        create_table_cleaners
+        create_custom_cleaners
+      end
+
+      @@cleaner_classes
+    end
+
     def start(test_strategy, options = {})
       @cleaners      = []
       @test_strategy = test_strategy
 
-      create_table_cleaners options
-      create_custom_cleaners options
+      start_method = "#{@test_type}_start".to_sym
+      end_method   = "#{@test_type}_end".to_sym
 
-      seed_sorts = @cleaners.map { |cleaner| Seedling::Seeder::SeederSorter.new(cleaner) }
-      seed_sorts.sort!
+      cleaner_classes.each do |clean_class|
+        table = clean_class[0]
+        table ||= clean_class[1]
 
-      @cleaners = seed_sorts.map(&:seed_base_object)
+        begin
+          @cleaners << clean_class[2].new(start_method, end_method, table, options)
+        rescue Exception => error
+          puts error.to_s
+          raise error
+        end
+      end
+
+      unless @@cleaner_classes_sorted
+        seed_sorts = @cleaners.map { |cleaner| Seedling::Seeder::SeederSorter.new(cleaner) }
+        seed_sorts.sort!
+
+        @cleaners = seed_sorts.map(&:seed_base_object)
+
+        sorted_classes = []
+        @cleaners.each do |cleaner|
+          cleaner_class = cleaner_classes.detect do |unsorted_cleaner|
+            if cleaner.class == unsorted_cleaner[2]
+              if unsorted_cleaner[2] == PseudoCleaner::TableCleaner
+                cleaner.table == unsorted_cleaner[0] || cleaner.table == unsorted_cleaner[1]
+              else
+                true
+              end
+            end
+          end
+
+          sorted_classes << cleaner_class
+        end
+
+        @@cleaner_classes        = sorted_classes
+        @@cleaner_classes_sorted = true
+      end
 
       start_all_cleaners options
     end
@@ -190,14 +235,14 @@ module PseudoCleaner
       Seedling::Seeder.create_order.each do |table|
         cleaner_class = PseudoCleaner::MasterCleaner.cleaner_class(table.name)
         if cleaner_class
-          @cleaners << cleaner_class.new("#{@test_type}_start".to_sym, "#{@test_type}_end".to_sym, table, options)
+          cleaner_classes << [table, nil, cleaner_class]
         end
       end
       if Seedling::Seeder.respond_to?(:unclassed_tables)
         Seedling::Seeder.unclassed_tables.each do |table_name|
           cleaner_class = PseudoCleaner::MasterCleaner.cleaner_class(table_name)
           if cleaner_class
-            @cleaners << cleaner_class.new("#{@test_type}_start".to_sym, "#{@test_type}_end".to_sym, table_name, options)
+            cleaner_classes << [nil, table_name, cleaner_class]
           end
         end
       end
@@ -229,8 +274,8 @@ module PseudoCleaner
           if check_class &&
               PseudoCleaner::MasterCleaner::VALID_TEST_METHODS.
                   any? { |test_method| check_class.instance_methods.include?(test_method) }
-            unless @cleaners.any? { |cleaner| check_class.name == cleaner.class.name }
-              @cleaners << check_class.new("#{@test_type}_start".to_sym, "#{@test_type}_end".to_sym, nil, options)
+            unless cleaner_classes.any? { |cleaner| check_class == cleaner[2] }
+              cleaner_classes << [nil, nil, check_class]
             end
           end
         end
