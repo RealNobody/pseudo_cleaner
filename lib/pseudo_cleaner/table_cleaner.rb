@@ -68,12 +68,12 @@ module PseudoCleaner
     end
 
     def test_start test_strategy
-      @test_strategy = test_strategy
+      @test_strategy ||= test_strategy
       save_state
     end
 
     def suite_start test_strategy
-      @test_strategy = test_strategy
+      @test_strategy ||= test_strategy
       save_state
     end
 
@@ -183,15 +183,15 @@ module PseudoCleaner
     end
 
     def reset_table test_strategy, suite_end
-      if @test_strategy != test_strategy
+      if @test_strategy != test_strategy && !PseudoCleaner::Configuration.current_instance.single_cleaner_set
         if @options[:output_diagnostics]
           PseudoCleaner::Logger.write("  *** The ending strategy for \"#{initial_state[:table_name]}\" changed! ***".red.on_light_white)
         end
       end
 
-      initial_state = @@initial_states[@table]
+      if test_strategy == :pseudo_delete
+        initial_state = @@initial_states[@table]
 
-      if @test_strategy == :pseudo_delete || test_strategy == :pseudo_delete
         # we should check the relationships for any records which still refer to
         # a now deleted record.  (i.e. if we updated a record to refer to a record)
         # we deleted...

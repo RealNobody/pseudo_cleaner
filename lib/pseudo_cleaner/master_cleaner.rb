@@ -55,22 +55,29 @@ module PseudoCleaner
               PseudoCleaner::MasterCleaner.database_reset
           end
 
-          pseudo_cleaner_data[:pseudo_state].end
+          pseudo_cleaner_data[:pseudo_state].end test_type: :test, test_strategy: pseudo_cleaner_data[:test_strategy]
         end
       end
 
       def end_suite
-        @@suite_cleaner.end :pseudo_delete if @@suite_cleaner
+        @@suite_cleaner.end test_strategy: :pseudo_delete if @@suite_cleaner
       end
 
       def start_test test_strategy
-        cleaner = PseudoCleaner::MasterCleaner.new(:test)
-        cleaner.start test_strategy
+        cleaner = if PseudoCleaner::Configuration.current_instance.single_cleaner_set
+                    @@suite_cleaner
+                  else
+                    PseudoCleaner::MasterCleaner.new(:test)
+                  end
+
+        cleaner.start test_strategy, test_type: :test, test_strategy: test_strategy
 
         cleaner
       end
 
       def clean(test_type, test_strategy, &block)
+        raise "Invalid test_type \"#{test_type}\"" unless [:suite,  :test].include? test_type
+
         master_cleaner = PseudoCleaner::MasterCleaner.send "start_#{test_type}", test_strategy
 
         body_error = nil
@@ -80,7 +87,7 @@ module PseudoCleaner
           body_error = error
         end
 
-        master_cleaner.end
+        master_cleaner.end test_type: test_type, test_strategy: test_strategy
 
         raise body_error if body_error
       end
@@ -178,55 +185,60 @@ module PseudoCleaner
     end
 
     def start(test_strategy, options = {})
-      @cleaners      = []
-      @test_strategy = test_strategy
+      test_type = options[:test_type] || @test_type
 
-      start_method = "#{@test_type}_start".to_sym
-      end_method   = "#{@test_type}_end".to_sym
+      unless @cleaners
+        @cleaners      = []
+        @test_strategy = test_strategy
 
-      cleaner_classes.each do |clean_class|
-        table = clean_class[0]
-        table ||= clean_class[1]
+        start_method = "#{test_type}_start".to_sym
+        end_method   = "#{test_type}_end".to_sym
 
-        begin
-          @cleaners << clean_class[2].new(start_method, end_method, table, options)
-        rescue Exception => error
-          puts error.to_s
-          raise error
+        cleaner_classes.each do |clean_class|
+          table = clean_class[0]
+          table ||= clean_class[1]
+
+          begin
+            @cleaners << clean_class[2].new(start_method, end_method, table, options)
+          rescue Exception => error
+            puts error.to_s
+            raise error
+          end
         end
-      end
 
-      unless @@cleaner_classes_sorted
-        seed_sorts = @cleaners.map { |cleaner| Seedling::Seeder::SeederSorter.new(cleaner) }
-        seed_sorts.sort!
+        unless @@cleaner_classes_sorted
+          seed_sorts = @cleaners.map { |cleaner| Seedling::Seeder::SeederSorter.new(cleaner) }
+          seed_sorts.sort!
 
-        @cleaners = seed_sorts.map(&:seed_base_object)
+          @cleaners = seed_sorts.map(&:seed_base_object)
 
-        sorted_classes = []
-        @cleaners.each do |cleaner|
-          cleaner_class = cleaner_classes.detect do |unsorted_cleaner|
-            if cleaner.class == unsorted_cleaner[2]
-              if unsorted_cleaner[2] == PseudoCleaner::TableCleaner
-                cleaner.table == unsorted_cleaner[0] || cleaner.table == unsorted_cleaner[1]
-              else
-                true
+          sorted_classes = []
+          @cleaners.each do |cleaner|
+            cleaner_class = cleaner_classes.detect do |unsorted_cleaner|
+              if cleaner.class == unsorted_cleaner[2]
+                if unsorted_cleaner[2] == PseudoCleaner::TableCleaner
+                  cleaner.table == unsorted_cleaner[0] || cleaner.table == unsorted_cleaner[1]
+                else
+                  true
+                end
               end
             end
+
+            sorted_classes << cleaner_class
           end
 
-          sorted_classes << cleaner_class
+          @@cleaner_classes        = sorted_classes
+          @@cleaner_classes_sorted = true
         end
-
-        @@cleaner_classes        = sorted_classes
-        @@cleaner_classes_sorted = true
       end
 
       start_all_cleaners options
     end
 
     def end(options = {})
+      test_type = options[:test_type] || @test_type
       if PseudoCleaner::Configuration.current_instance.output_diagnostics
-        PseudoCleaner::Logger.write("Cleaning #{@test_type}")
+        PseudoCleaner::Logger.write("Cleaning #{test_type}")
       end
       end_all_cleaners options
     end
@@ -302,20 +314,23 @@ module PseudoCleaner
     end
 
     def start_all_cleaners(options)
-      run_all_cleaners("#{@test_type}_start".to_sym, @cleaners, options)
+      test_type = options[:test_type] || @test_type
+      run_all_cleaners("#{test_type}_start".to_sym, @cleaners, options)
     end
 
     def end_all_cleaners(options)
-      run_all_cleaners("#{@test_type}_end".to_sym, @cleaners.reverse, options)
+      test_type = options[:test_type] || @test_type
+      run_all_cleaners("#{test_type}_end".to_sym, @cleaners.reverse, options)
     end
 
     def run_all_cleaners(cleaner_function, cleaners, options)
       last_error = nil
+      test_strategy = options[:test_strategy] || @test_strategy
 
       cleaners.each do |cleaner|
         begin
           if cleaner.respond_to?(cleaner_function)
-            cleaner.send(cleaner_function, @test_strategy)
+            cleaner.send(cleaner_function, test_strategy)
           end
         rescue => error
           PseudoCleaner::MasterCleaner.process_exception(last_error) if last_error

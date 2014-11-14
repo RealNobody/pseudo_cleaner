@@ -10,6 +10,7 @@ module PseudoCleaner
     attr_accessor :output_diagnostics
     attr_accessor :clean_database_before_tests
     attr_accessor :reset_auto_increment
+    attr_accessor :single_cleaner_set
 
     def self.current_instance
       @@current_instance ||= PseudoCleaner::Configuration.new
@@ -19,6 +20,7 @@ module PseudoCleaner
       @output_diagnostics = false
       @clean_database_before_tests = false
       @reset_auto_increment = false
+      @single_cleaner_set = true
     end
 
     #todo add configuration for doing referential integrity checks after run
