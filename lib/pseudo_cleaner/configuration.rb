@@ -17,14 +17,10 @@ module PseudoCleaner
     end
 
     def initialize
-      @output_diagnostics = false
-      @clean_database_before_tests = false
-      @reset_auto_increment = false
-      @single_cleaner_set = true
+      @output_diagnostics = false           # false to keep the noise level down...
+      @clean_database_before_tests = false  # false because I think it will annoy developers...
+      @reset_auto_increment = true          # true because I think it should be done
+      @single_cleaner_set = true            # true because I hope it will improve performance
     end
-
-    #todo add configuration for doing referential integrity checks after run
-    #todo add configuration for fixing referential integrity failures after run
-    #todo add configuration for raising error if referential integrity is bad before the test runs
   end
 end

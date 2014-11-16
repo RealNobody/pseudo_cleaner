@@ -1,4 +1,6 @@
-first_test_run = false
+first_test_run                                     = false
+
+# turn off Cucumber's default usage of DatabaseCleaner
 Cucumber::Rails::Database.autorun_database_cleaner = false
 
 Before do |scenario|
@@ -12,7 +14,7 @@ Before do |scenario|
       PseudoCleaner::MasterCleaner.start_suite
     end
 
-    DatabaseCleaner.strategy                           = :transaction
+    DatabaseCleaner.strategy = :transaction
   end
 end
 

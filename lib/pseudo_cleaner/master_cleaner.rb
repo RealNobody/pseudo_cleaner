@@ -20,7 +20,9 @@ module PseudoCleaner
 
     class << self
       def start_suite
-        PseudoCleaner::TableCleaner.reset_suite
+        if @@suite_cleaner
+          @@suite_cleaner.reset_suite
+        end
         @@suite_cleaner = PseudoCleaner::MasterCleaner.new(:suite)
         @@suite_cleaner.start :pseudo_delete
         @@suite_cleaner
@@ -31,7 +33,9 @@ module PseudoCleaner
         pseudo_cleaner_data[:test_strategy] = strategy
 
         unless strategy == :none
-          DatabaseCleaner.strategy = PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES[strategy]
+          raise "invalid strategy" unless PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES.has_key? strategy
+
+          DatabaseCleaner.strategy           = PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES[strategy]
           unless [:pseudo_delete, :transaction].include? strategy
             DatabaseCleaner.start
           end
@@ -64,6 +68,8 @@ module PseudoCleaner
       end
 
       def start_test test_strategy
+        raise "Invalid test_strategy \"#{test_strategy}\"" unless CLEANING_STRATEGIES.include? test_strategy
+
         cleaner = if PseudoCleaner::Configuration.current_instance.single_cleaner_set
                     @@suite_cleaner
                   else
@@ -76,7 +82,8 @@ module PseudoCleaner
       end
 
       def clean(test_type, test_strategy, &block)
-        raise "Invalid test_type \"#{test_type}\"" unless [:suite,  :test].include? test_type
+        raise "Invalid test_type \"#{test_type}\"" unless [:suite, :test].include? test_type
+        raise "Invalid test_strategy \"#{test_strategy}\"" unless CLEANING_STRATEGIES.include? test_strategy
 
         master_cleaner = PseudoCleaner::MasterCleaner.send "start_#{test_type}", test_strategy
 
@@ -165,23 +172,93 @@ module PseudoCleaner
 
         return_class
       end
+
+      def cleaner_classes
+        unless @@cleaner_classes
+          @@cleaner_classes = []
+
+          PseudoCleaner::MasterCleaner.create_table_cleaners
+          PseudoCleaner::MasterCleaner.create_custom_cleaners
+        end
+
+        @@cleaner_classes
+      end
+
+      def create_table_cleaners(options = {})
+        Seedling::Seeder.create_order.each do |table|
+          cleaner_class = PseudoCleaner::MasterCleaner.cleaner_class(table.name)
+          if cleaner_class
+            PseudoCleaner::MasterCleaner.cleaner_classes << [table, nil, cleaner_class]
+          end
+        end
+        if Seedling::Seeder.respond_to?(:unclassed_tables)
+          Seedling::Seeder.unclassed_tables.each do |table_name|
+            cleaner_class = PseudoCleaner::MasterCleaner.cleaner_class(table_name)
+            if cleaner_class
+              PseudoCleaner::MasterCleaner.cleaner_classes << [nil, table_name, cleaner_class]
+            end
+          end
+        end
+      end
+
+      def create_custom_cleaners(options = {})
+        if Object.const_defined?("Rails", false)
+          cleaner_root  = Rails.root.join("db/cleaners/").to_s
+          cleaner_files = Dir[Rails.root.join("db/cleaners/**/*.rb")]
+
+          cleaner_files.each do |cleaner_file|
+            class_name = File.basename(cleaner_file, ".rb").classify
+
+            check_class, full_module_name = find_file_class(cleaner_file, cleaner_root)
+            unless check_class && check_class.const_defined?(class_name, false)
+              require cleaner_file
+              check_class, full_module_name = find_file_class(cleaner_file, cleaner_root)
+            end
+
+            if check_class
+              full_module_name << class_name
+              if check_class.const_defined?(class_name, false)
+                check_class = full_module_name.join("::").constantize
+              else
+                check_class = nil
+              end
+            end
+
+            if check_class &&
+                PseudoCleaner::MasterCleaner::VALID_TEST_METHODS.
+                    any? { |test_method| check_class.instance_methods.include?(test_method) }
+              unless PseudoCleaner::MasterCleaner.cleaner_classes.any? { |cleaner| check_class == cleaner[2] }
+                PseudoCleaner::MasterCleaner.cleaner_classes << [nil, nil, check_class]
+              end
+            end
+          end
+        end
+      end
+
+      def find_file_class(seeder_file, seeder_root)
+        check_class      = Object
+        full_module_name = []
+
+        File.dirname(seeder_file.to_s[seeder_root.length..-1]).split("/").map do |module_element|
+          if (module_element != ".")
+            full_module_name << module_element.classify
+            if check_class.const_defined?(full_module_name[-1], false)
+              check_class = full_module_name.join("::").constantize
+            else
+              check_class = nil
+              break
+            end
+          end
+        end
+
+        return check_class, full_module_name
+      end
     end
 
     def initialize(test_type)
       raise "Invalid test type.  Must be one of: #{VALID_TEST_TYPES}" unless VALID_TEST_TYPES.include?(test_type)
 
       @test_type = test_type
-    end
-
-    def cleaner_classes
-      unless @@cleaner_classes
-        @@cleaner_classes = []
-
-        create_table_cleaners
-        create_custom_cleaners
-      end
-
-      @@cleaner_classes
     end
 
     def start(test_strategy, options = {})
@@ -194,7 +271,7 @@ module PseudoCleaner
         start_method = "#{test_type}_start".to_sym
         end_method   = "#{test_type}_end".to_sym
 
-        cleaner_classes.each do |clean_class|
+        PseudoCleaner::MasterCleaner.cleaner_classes.each do |clean_class|
           table = clean_class[0]
           table ||= clean_class[1]
 
@@ -214,7 +291,7 @@ module PseudoCleaner
 
           sorted_classes = []
           @cleaners.each do |cleaner|
-            cleaner_class = cleaner_classes.detect do |unsorted_cleaner|
+            cleaner_class = PseudoCleaner::MasterCleaner.cleaner_classes.detect do |unsorted_cleaner|
               if cleaner.class == unsorted_cleaner[2]
                 if unsorted_cleaner[2] == PseudoCleaner::TableCleaner
                   cleaner.table == unsorted_cleaner[0] || cleaner.table == unsorted_cleaner[1]
@@ -243,94 +320,29 @@ module PseudoCleaner
       end_all_cleaners options
     end
 
-    def create_table_cleaners(options = {})
-      Seedling::Seeder.create_order.each do |table|
-        cleaner_class = PseudoCleaner::MasterCleaner.cleaner_class(table.name)
-        if cleaner_class
-          cleaner_classes << [table, nil, cleaner_class]
-        end
-      end
-      if Seedling::Seeder.respond_to?(:unclassed_tables)
-        Seedling::Seeder.unclassed_tables.each do |table_name|
-          cleaner_class = PseudoCleaner::MasterCleaner.cleaner_class(table_name)
-          if cleaner_class
-            cleaner_classes << [nil, table_name, cleaner_class]
-          end
-        end
-      end
-    end
-
-    def create_custom_cleaners(options = {})
-      if Object.const_defined?("Rails", false)
-        cleaner_root  = Rails.root.join("db/cleaners/").to_s
-        cleaner_files = Dir[Rails.root.join("db/cleaners/**/*.rb")]
-
-        cleaner_files.each do |cleaner_file|
-          class_name = File.basename(cleaner_file, ".rb").classify
-
-          check_class, full_module_name = find_file_class(cleaner_file, cleaner_root)
-          unless check_class && check_class.const_defined?(class_name, false)
-            require cleaner_file
-            check_class, full_module_name = find_file_class(cleaner_file, cleaner_root)
-          end
-
-          if check_class
-            full_module_name << class_name
-            if check_class.const_defined?(class_name, false)
-              check_class = full_module_name.join("::").constantize
-            else
-              check_class = nil
-            end
-          end
-
-          if check_class &&
-              PseudoCleaner::MasterCleaner::VALID_TEST_METHODS.
-                  any? { |test_method| check_class.instance_methods.include?(test_method) }
-            unless cleaner_classes.any? { |cleaner| check_class == cleaner[2] }
-              cleaner_classes << [nil, nil, check_class]
-            end
-          end
-        end
-      end
-    end
-
-    def find_file_class(seeder_file, seeder_root)
-      check_class      = Object
-      full_module_name = []
-
-      File.dirname(seeder_file.to_s[seeder_root.length..-1]).split("/").map do |module_element|
-        if (module_element != ".")
-          full_module_name << module_element.classify
-          if check_class.const_defined?(full_module_name[-1], false)
-            check_class = full_module_name.join("::").constantize
-          else
-            check_class = nil
-            break
-          end
-        end
-      end
-
-      return check_class, full_module_name
-    end
-
     def start_all_cleaners(options)
-      test_type = options[:test_type] || @test_type
-      run_all_cleaners("#{test_type}_start".to_sym, @cleaners, options)
+      test_type     = options[:test_type] || @test_type
+      test_strategy = options[:test_strategy] || @test_strategy
+      run_all_cleaners("#{test_type}_start".to_sym, @cleaners, test_strategy)
     end
 
     def end_all_cleaners(options)
-      test_type = options[:test_type] || @test_type
-      run_all_cleaners("#{test_type}_end".to_sym, @cleaners.reverse, options)
+      test_type     = options[:test_type] || @test_type
+      test_strategy = options[:test_strategy] || @test_strategy
+      run_all_cleaners("#{test_type}_end".to_sym, @cleaners.reverse, test_strategy)
     end
 
-    def run_all_cleaners(cleaner_function, cleaners, options)
+    def reset_suite
+      run_all_cleaners(:reset_suite, @cleaners.reverse)
+    end
+
+    def run_all_cleaners(cleaner_function, cleaners, *args)
       last_error = nil
-      test_strategy = options[:test_strategy] || @test_strategy
 
       cleaners.each do |cleaner|
         begin
           if cleaner.respond_to?(cleaner_function)
-            cleaner.send(cleaner_function, test_strategy)
+            cleaner.send(cleaner_function, *args)
           end
         rescue => error
           PseudoCleaner::MasterCleaner.process_exception(last_error) if last_error

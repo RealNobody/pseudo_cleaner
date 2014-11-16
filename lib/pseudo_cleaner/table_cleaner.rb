@@ -4,7 +4,7 @@ module PseudoCleaner
 
     @@initial_states = {}
 
-    def self.reset_suite
+    def reset_suite
       @@initial_states = {}
     end
 
@@ -32,7 +32,7 @@ module PseudoCleaner
         initial_state[:table_is_active_record] = false
 
         if Object.const_defined?("ActiveRecord", false) && ActiveRecord.const_defined?("Base", false)
-          if table.is_a?(String) || table.is_a?(Symbol)
+          if symbol_table?
             initial_state[:table_is_active_record] = true
             initial_state[:table_name]             = table
           else
@@ -51,7 +51,7 @@ module PseudoCleaner
         initial_state[:table_is_sequel_model] = false
 
         if Object.const_defined?("Sequel", false) && Sequel.const_defined?("Model", false)
-          if table.is_a?(String) || table.is_a?(Symbol)
+          if symbol_table?
             initial_state[:table_is_sequel_model] = Sequel::DATABASES[0][table]
             initial_state[:table_name]            = table
           else
@@ -95,7 +95,9 @@ module PseudoCleaner
           test_start_sequel_model @test_strategy
         end
 
-        reset_auto_increment !PseudoCleaner::Configuration.current_instance.clean_database_before_tests
+        if PseudoCleaner::Configuration.current_instance.reset_auto_increment
+          reset_auto_increment !PseudoCleaner::Configuration.current_instance.clean_database_before_tests
+        end
 
         if initial_state.has_key?(:count) && @options[:output_diagnostics]
           PseudoCleaner::Logger.write("    *** There are no columns to track inserts and updates easily on for #{initial_state[:table_name]} ***".red.on_light_white)
@@ -103,65 +105,39 @@ module PseudoCleaner
       end
     end
 
-    def test_start_active_record test_strategy
-      initial_state = @@initial_states[@table]
+    def symbol_table?
+      table.is_a?(String) || table.is_a?(Symbol)
+    end
 
-      if table.is_a?(String) || table.is_a?(Symbol)
-        # TODO: do this
-        raise "This isn't done yet"
+    def active_record_table
+      if symbol_table?
+        table
       else
-        if columns.find { |column| column.name == "id" }
-          initial_state[:max_id] = table.maximum(:id) || 0
-          PseudoCleaner::Logger.write("    max(id) = #{initial_state[:max_id]}") if @options[:output_diagnostics]
-        end
-
-        [:created, :updated].each do |date_name|
-          [:at, :on].each do |verb_name|
-            date_column_name = "#{date_name}_#{verb_name}"
-
-            if columns.find { |column| column.name == date_column_name }
-              initial_state[date_name] = {
-                  column_name: date_column_name,
-                  value:       table.maximum(date_column_name) || Time.now - 1.second
-              }
-              if @options[:output_diagnostics]
-                PseudoCleaner::Logger.write("    max(#{initial_state[date_name][:column_name]}) = #{initial_state[date_name][:value]}")
-              end
-
-              break
-            end
-          end
-        end
-      end
-
-      if initial_state.blank?
-        # TODO: do this
-        raise "this isn't done yet"
-
-        # initial_state[:count] = access_table.count
+        table.table_name
       end
     end
 
-    def test_start_sequel_model test_strategy
-      initial_state = @@initial_states[@table]
-      access_table  = sequel_model_table
+    def test_start_active_record test_strategy
+      new_state = {}
 
-      if access_table.columns.include?(:id)
-        initial_state[:max_id] = access_table.unfiltered.max(:id) || 0
-        PseudoCleaner::Logger.write("    max(id) = #{initial_state[:max_id]}") if @options[:output_diagnostics]
+      table_name = active_record_table
+      if ActiveRecord::Base.connection.columns(table_name).find { |column| column.name == "id" }
+        new_state[:max_id] = ActiveRecord::Base.connection.execute("SELECT MAX(`id`) FROM `#{table_name}`").first[0] || 0
+        PseudoCleaner::Logger.write("    max(id) = #{new_state[:max_id]}") if @options[:output_diagnostics]
       end
 
       [:created, :updated].each do |date_name|
         [:at, :on].each do |verb_name|
-          date_column_name = "#{date_name}_#{verb_name}".to_sym
+          date_column_name = "#{date_name}_#{verb_name}"
 
-          if access_table.columns.include?(date_column_name)
-            initial_state[date_name] = {
+          if ActiveRecord::Base.connection.columns(table_name).find { |column| column.name == date_column_name }
+            new_state[date_name] = {
                 column_name: date_column_name,
-                value:       access_table.unfiltered.max(date_column_name) || Time.now - 1.second
+                value:       ActiveRecord::Base.connection.execute("SELECT MAX(`#{date_column_name}`) FROM `#{table_name}`").first[0] ||
+                                 Time.now - 1.second
             }
             if @options[:output_diagnostics]
-              PseudoCleaner::Logger.write("    max(#{initial_state[date_name][:column_name]}) = #{initial_state[date_name][:value]}")
+              PseudoCleaner::Logger.write("    max(#{new_state[date_name][:column_name]}) = #{new_state[date_name][:value]}")
             end
 
             break
@@ -169,20 +145,56 @@ module PseudoCleaner
         end
       end
 
-      if initial_state.blank?
-        initial_state[:count] = access_table.unfiltered.count
+      if new_state.blank?
+        new_state[:count] = ActiveRecord::Base.connection.execute("SELECT COUNT(*) FROM `#{table_name}`").first[0]
       end
+
+      @@initial_states[@table] = @@initial_states[@table].merge new_state
+    end
+
+    def test_start_sequel_model test_strategy
+      new_state = {}
+      access_table  = sequel_model_table
+
+      if access_table.columns.include?(:id)
+        new_state[:max_id] = access_table.unfiltered.max(:id) || 0
+        PseudoCleaner::Logger.write("    max(id) = #{new_state[:max_id]}") if @options[:output_diagnostics]
+      end
+
+      [:created, :updated].each do |date_name|
+        [:at, :on].each do |verb_name|
+          date_column_name = "#{date_name}_#{verb_name}".to_sym
+
+          if access_table.columns.include?(date_column_name)
+            new_state[date_name] = {
+                column_name: date_column_name,
+                value:       access_table.unfiltered.max(date_column_name) || Time.now - 1.second
+            }
+            if @options[:output_diagnostics]
+              PseudoCleaner::Logger.write("    max(#{new_state[date_name][:column_name]}) = #{new_state[date_name][:value]}")
+            end
+
+            break
+          end
+        end
+      end
+
+      if new_state.blank?
+        new_state[:count] = access_table.unfiltered.count
+      end
+
+      @@initial_states[@table] = @@initial_states[@table].merge new_state
     end
 
     def test_end test_strategy
-      reset_table test_strategy, false
+      reset_table test_strategy
     end
 
     def suite_end test_strategy
-      reset_table test_strategy, true
+      reset_table test_strategy
     end
 
-    def reset_table test_strategy, suite_end
+    def reset_table test_strategy
       if @test_strategy != test_strategy && !PseudoCleaner::Configuration.current_instance.single_cleaner_set
         if @options[:output_diagnostics]
           PseudoCleaner::Logger.write("  *** The ending strategy for \"#{initial_state[:table_name]}\" changed! ***".red.on_light_white)
@@ -217,71 +229,69 @@ module PseudoCleaner
       initial_state = @@initial_states[@table]
       cleaned_table = false
 
-      if table.is_a?(String) || table.is_a?(Symbol)
-        # TODO: do this
-        raise "This isn't done yet"
-      else
-        if initial_state[:max_id]
-          the_max     = initial_state[:max_id] || 0
-          num_deleted = table.delete_all(["id > :id", id: the_max])
-          if num_deleted > 0
-            cleaned_table = true
+      table_name = active_record_table
+      if initial_state[:max_id]
+        the_max = initial_state[:max_id] || 0
 
-            if @options[:output_diagnostics]
-              PseudoCleaner::Logger.write("    Deleted #{num_deleted} records by ID.")
-            end
+        ActiveRecord::Base.connection.execute("DELETE FROM `#{table_name}` WHERE id > #{the_max}")
+        num_deleted = ActiveRecord::Base.connection.raw_connection.affected_rows
+
+        if num_deleted > 0
+          cleaned_table = true
+
+          if @options[:output_diagnostics]
+            PseudoCleaner::Logger.write("    Deleted #{num_deleted} records by ID.")
           end
         end
+      end
 
-        if initial_state[:created]
-          num_deleted = table.
-              delete_all(["#{initial_state[:created][:column_name]} > :column_value",
-                          column_value: initial_state[:created][:value]])
-          if num_deleted > 0
-            cleaned_table = true
+      if initial_state[:created]
+        ActiveRecord::Base.connection.execute("DELETE FROM `#{table_name}` WHERE #{initial_state[:created][:column_name]} > '#{initial_state[:created][:value]}'")
+        num_deleted = ActiveRecord::Base.connection.raw_connection.affected_rows
 
-            if @options[:output_diagnostics]
-              PseudoCleaner::Logger.write("    Deleted #{num_deleted} records by #{initial_state[:created][:column_name]}.")
-            end
+        if num_deleted > 0
+          cleaned_table = true
+
+          if @options[:output_diagnostics]
+            PseudoCleaner::Logger.write("    Deleted #{num_deleted} records by #{initial_state[:created][:column_name]}.")
           end
         end
+      end
 
-        if initial_state[:updated]
-          dirty_count = table.
-              where("#{initial_state[:updated][:column_name]} > :column_value",
-                    column_value: initial_state[:updated][:value]).count
+      if initial_state[:updated]
+        dirty_count = ActiveRecord::Base.connection.execute("SELECT COUNT(*) FROM `#{table_name}` WHERE #{initial_state[:updated][:column_name]} > '#{initial_state[:updated][:value]}'").first[0]
 
-          if @options[:output_diagnostics] && dirty_count > 0
-            # cleaned_table = true
+        if @options[:output_diagnostics] && dirty_count > 0
+          # cleaned_table = true
 
-            initial_state[:updated][:value] = table.maximum(initial_state[:updated][:column_name])
+          initial_state[:updated][:value] = ActiveRecord::Base.connection.execute("SELECT MAX(#{initial_state[:updated][:column_name]}) FROM `#{table_name}`").first[0]
 
-            PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
-            PseudoCleaner::Logger.write("    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
-          end
+          PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
+          PseudoCleaner::Logger.write("    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
         end
       end
 
       if initial_state[:count]
-        # TODO: do this
-        raise "This isn't done yet"
+        final_count = ActiveRecord::Base.connection.execute("SELECT COUNT(*) FROM `#{table_name}`").first[0]
+        if initial_state[:count] == 0
+          cleaned_table = true
 
-        # final_count = access_table.unfiltered.count
-        # if initial_state[:count] == 0
-        #   DatabaseCleaner.clean_with(:truncation, only: [initial_state[:table_name]])
-        #   if @options[:output_diagnostics]
-        #     PseudoCleaner::Logger.write("    Deleted #{final_count} records by cleaning the table.") if final_count > 0
-        #   end
-        #
-        #   final_count = access_table.unfiltered.count
-        # end
-        #
-        # if initial_state[:count] != final_count
-        #   PseudoCleaner::Logger.write("    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
-        # end
+          DatabaseCleaner.clean_with(:truncation, only: [initial_state[:table_name]])
+          if @options[:output_diagnostics]
+            PseudoCleaner::Logger.write("    Deleted #{final_count} records by cleaning the table.") if final_count > 0
+          end
+
+          final_count = ActiveRecord::Base.connection.execute("SELECT COUNT(*) FROM `#{table_name}`").first[0]
+        end
+
+        if initial_state[:count] != final_count
+          PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
+          PseudoCleaner::Logger.write("    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
+
+          initial_state[:count] = final_count
+          cleaned_table         = true
+        end
       end
-
-      #TODO:  Add referential integrity checks
 
       if cleaned_table
         reset_auto_increment true
@@ -349,15 +359,13 @@ module PseudoCleaner
         end
 
         if initial_state[:count] != final_count
-          initial_state[:count] = final_count
-          cleaned_table         = true
-
           PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
           PseudoCleaner::Logger.write("    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
+
+          initial_state[:count] = final_count
+          cleaned_table         = true
         end
       end
-
-      #TODO:  Add referential integrity checks
 
       if cleaned_table
         reset_auto_increment true
@@ -379,21 +387,33 @@ module PseudoCleaner
     end
 
     def reset_auto_increment_active_record
-      # TODO: do this
-      raise "Not implemented yet"
+      initial_state = @@initial_states[@table]
+
+      if initial_state[:max_id]
+        table_name = active_record_table
+
+        unless table_name.blank?
+          if @options[:output_diagnostics]
+            PseudoCleaner::Logger.write("    ALTER TABLE #{table_name} AUTO_INCREMENT = #{initial_state[:max_id] + 1}")
+          end
+
+          ActiveRecord::Base.connection.execute("ALTER TABLE #{table_name} AUTO_INCREMENT = #{initial_state[:max_id] + 1}")
+        end
+      end
     end
 
     def reset_auto_increment_sequel_model
       initial_state = @@initial_states[@table]
 
       if initial_state[:max_id]
-        unless sequel_model_table_name.blank?
-          access_table_name = sequel_model_table_name
+        table_name = sequel_model_table_name
+
+        unless table_name.blank?
           if @options[:output_diagnostics]
-            puts("    ALTER TABLE targeted_email_batches AUTO_INCREMENT = #{initial_state[:max_id] + 1}")
+            PseudoCleaner::Logger.write("    ALTER TABLE #{table_name} AUTO_INCREMENT = #{initial_state[:max_id] + 1}")
           end
 
-          DB["ALTER TABLE #{sequel_model_table_name} AUTO_INCREMENT = #{initial_state[:max_id] + 1}"].first
+          Sequel::DATABASES[0]["ALTER TABLE #{table_name} AUTO_INCREMENT = #{initial_state[:max_id] + 1}"].first
         end
       end
     end
@@ -422,7 +442,7 @@ module PseudoCleaner
     end
 
     def sequel_model_table
-      if table.is_a?(String) || table.is_a?(Symbol)
+      if symbol_table?
         Sequel::DATABASES[0][table]
       else
         table.dataset
@@ -430,7 +450,7 @@ module PseudoCleaner
     end
 
     def sequel_model_table_name
-      if table.is_a?(String) || table.is_a?(Symbol)
+      if symbol_table?
         "`#{table}`"
       else
         table.simple_table
