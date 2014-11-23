@@ -53,10 +53,10 @@ RSpec.configure do |config|
   end
 
   config.after(:each) do |example|
-    timing = Benchmark.measure do
-      clean_example = example
-      clean_example = example.example if example.respond_to?(:example)
+    clean_example = example
+    clean_example = example.example if example.respond_to?(:example)
 
+    timing = Benchmark.measure do
       PseudoCleaner::MasterCleaner.end_example(clean_example)
     end
 
