@@ -145,16 +145,15 @@ module PseudoCleaner
         end
       end
 
-      if new_state.blank?
-        new_state[:count] = ActiveRecord::Base.connection.execute("SELECT COUNT(*) FROM `#{table_name}`").first[0]
-      end
+      new_state[:blank] = new_state.blank?
+      new_state[:count] = ActiveRecord::Base.connection.execute("SELECT COUNT(*) FROM `#{table_name}`").first[0]
 
       @@initial_states[@table] = @@initial_states[@table].merge new_state
     end
 
     def test_start_sequel_model test_strategy
-      new_state = {}
-      access_table  = sequel_model_table
+      new_state    = {}
+      access_table = sequel_model_table
 
       if access_table.columns.include?(:id)
         new_state[:max_id] = access_table.unfiltered.max(:id) || 0
@@ -179,9 +178,8 @@ module PseudoCleaner
         end
       end
 
-      if new_state.blank?
-        new_state[:count] = access_table.unfiltered.count
-      end
+      new_state[:blank] = new_state.blank?
+      new_state[:count] = access_table.unfiltered.count
 
       @@initial_states[@table] = @@initial_states[@table].merge new_state
     end
@@ -271,9 +269,9 @@ module PseudoCleaner
         end
       end
 
-      if initial_state[:count]
-        final_count = ActiveRecord::Base.connection.execute("SELECT COUNT(*) FROM `#{table_name}`").first[0]
-        if initial_state[:count] == 0
+      final_count = ActiveRecord::Base.connection.execute("SELECT COUNT(*) FROM `#{table_name}`").first[0]
+      if initial_state[:count] == 0
+        if initial_state[:blank]
           cleaned_table = true
 
           DatabaseCleaner.clean_with(:truncation, only: [initial_state[:table_name]])
@@ -283,14 +281,14 @@ module PseudoCleaner
 
           final_count = ActiveRecord::Base.connection.execute("SELECT COUNT(*) FROM `#{table_name}`").first[0]
         end
+      end
 
-        if initial_state[:count] != final_count
-          PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
-          PseudoCleaner::Logger.write("    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
+      if initial_state[:count] != final_count
+        PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
+        PseudoCleaner::Logger.write("    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
 
-          initial_state[:count] = final_count
-          cleaned_table         = true
-        end
+        initial_state[:count] = final_count
+        cleaned_table         = true
       end
 
       if cleaned_table
@@ -345,9 +343,9 @@ module PseudoCleaner
         end
       end
 
-      if initial_state[:count]
-        final_count = access_table.unfiltered.count
-        if initial_state[:count] == 0
+      final_count = access_table.unfiltered.count
+      if initial_state[:count] == 0
+        if initial_state[:blank]
           cleaned_table = true
 
           DatabaseCleaner.clean_with(:truncation, only: [initial_state[:table_name]])
@@ -357,14 +355,14 @@ module PseudoCleaner
 
           final_count = access_table.unfiltered.count
         end
+      end
 
-        if initial_state[:count] != final_count
-          PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
-          PseudoCleaner::Logger.write("    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
+      if initial_state[:count] != final_count
+        PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
+        PseudoCleaner::Logger.write("    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
 
-          initial_state[:count] = final_count
-          cleaned_table         = true
-        end
+        initial_state[:count] = final_count
+        cleaned_table         = true
       end
 
       if cleaned_table

@@ -1,3 +1,5 @@
+require "seedling"
+
 module PseudoCleaner
   class MasterCleaner
     @@suite_cleaner          = nil
@@ -36,7 +38,7 @@ module PseudoCleaner
           raise "invalid strategy" unless PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES.has_key? strategy
 
           DatabaseCleaner.strategy           = PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES[strategy]
-          unless [:pseudo_delete, :transaction].include? strategy
+          unless [:pseudo_delete].include? strategy
             DatabaseCleaner.start
           end
 
@@ -50,7 +52,7 @@ module PseudoCleaner
         pseudo_cleaner_data = example_class.instance_variable_get(:@pseudo_cleaner_data)
 
         unless pseudo_cleaner_data[:test_strategy] == :none
-          unless [:pseudo_delete, :transaction].include? pseudo_cleaner_data[:test_strategy]
+          unless [:pseudo_delete].include? pseudo_cleaner_data[:test_strategy]
             DatabaseCleaner.clean
           end
 
