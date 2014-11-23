@@ -26,6 +26,8 @@ RSpec.configure do |config|
   end
 
   config.before(:each) do |example|
+    new_strategy = nil
+
     timing = Benchmark.measure do
       clean_example = example
       clean_example = example.example if example.respond_to?(:example)
@@ -45,6 +47,7 @@ RSpec.configure do |config|
       PseudoCleaner::MasterCleaner.start_example(clean_example, new_strategy)
     end
 
+    PseudoCleaner::MasterCleaner.add_timing(new_strategy, timing)
     PseudoCleaner::MasterCleaner.add_timing(:rspec_each, timing)
     PseudoCleaner::MasterCleaner.add_timing(:total, timing)
   end
@@ -57,6 +60,8 @@ RSpec.configure do |config|
       PseudoCleaner::MasterCleaner.end_example(clean_example)
     end
 
+    pseudo_cleaner_data = clean_example.instance_variable_get(:@pseudo_cleaner_data)
+    PseudoCleaner::MasterCleaner.add_timing(pseudo_cleaner_data[:test_strategy], timing)
     PseudoCleaner::MasterCleaner.add_timing(:rspec_each, timing)
     PseudoCleaner::MasterCleaner.add_timing(:total, timing)
   end
