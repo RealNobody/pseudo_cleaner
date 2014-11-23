@@ -1,4 +1,5 @@
 require "seedling"
+$pseudo_timings = {}
 
 module PseudoCleaner
   class MasterCleaner
@@ -21,6 +22,34 @@ module PseudoCleaner
     VALID_TEST_METHODS  = VALID_START_METHODS + VALID_END_METHODS
 
     class << self
+      def add_timing(name, timing)
+        if $pseudo_timings[name]
+          $pseudo_timings[name] += timing
+        else
+          $pseudo_timings[name] = timing
+        end
+      end
+
+      def print_timings
+        $pseudo_timings.each do |timing_name, timings|
+          next if [:total, :suite, :rspec_each, :database_cleaner, :seed, :run_all_cleaners].include?(timing_name)
+          print_timing timing_name, timings
+        end
+        print_timing :database_cleaner, $pseudo_timings[:database_cleaner]
+        print_timing :seed, $pseudo_timings[:seed]
+        print_timing :run_all_cleaners, $pseudo_timings[:run_all_cleaners]
+        print_timing :rspec_each, $pseudo_timings[:rspec_each]
+        print_timing :suite, $pseudo_timings[:suite]
+        print_timing :total, $pseudo_timings[:total]
+      end
+
+      def print_timing(timing_name, timings)
+          puts("")
+          puts("")
+          puts(timing_name.to_s.bold.on_light_white)
+          puts(timings)
+      end
+
       def start_suite
         if @@suite_cleaner
           @@suite_cleaner.reset_suite
@@ -37,9 +66,13 @@ module PseudoCleaner
         unless strategy == :none
           raise "invalid strategy" unless PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES.has_key? strategy
 
-          DatabaseCleaner.strategy           = PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES[strategy]
+          DatabaseCleaner.strategy = PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES[strategy]
           unless [:pseudo_delete].include? strategy
-            DatabaseCleaner.start
+            timing = Benchmark.measure do
+              DatabaseCleaner.start
+            end
+
+            PseudoCleaner::MasterCleaner.add_timing(:database_cleaner, timing)
           end
 
           pseudo_cleaner_data[:pseudo_state] = PseudoCleaner::MasterCleaner.start_test strategy
@@ -53,7 +86,11 @@ module PseudoCleaner
 
         unless pseudo_cleaner_data[:test_strategy] == :none
           unless [:pseudo_delete].include? pseudo_cleaner_data[:test_strategy]
-            DatabaseCleaner.clean
+            timing = Benchmark.measure do
+              DatabaseCleaner.clean
+            end
+
+            PseudoCleaner::MasterCleaner.add_timing(:database_cleaner, timing)
           end
 
           case pseudo_cleaner_data[:test_strategy]
@@ -114,7 +151,11 @@ module PseudoCleaner
 
       def seed_data
         PseudoCleaner::Logger.write("Re-seeding database".red.on_light_white)
-        Seedling::Seeder.seed_all
+        timing = Benchmark.measure do
+          Seedling::Seeder.seed_all
+        end
+
+        PseudoCleaner::MasterCleaner.add_timing(:seed, timing)
       end
 
       def process_exception(error)
@@ -339,21 +380,25 @@ module PseudoCleaner
     end
 
     def run_all_cleaners(cleaner_function, cleaners, *args)
-      last_error = nil
+      timing = Benchmark.measure do
+        last_error = nil
 
-      cleaners.each do |cleaner|
-        begin
-          if cleaner.respond_to?(cleaner_function)
-            cleaner.send(cleaner_function, *args)
+        cleaners.each do |cleaner|
+          begin
+            if cleaner.respond_to?(cleaner_function)
+              cleaner.send(cleaner_function, *args)
+            end
+          rescue => error
+            PseudoCleaner::MasterCleaner.process_exception(last_error) if last_error
+
+            last_error = error
           end
-        rescue => error
-          PseudoCleaner::MasterCleaner.process_exception(last_error) if last_error
-
-          last_error = error
         end
+
+        raise last_error if last_error
       end
 
-      raise last_error if last_error
+      PseudoCleaner::MasterCleaner.add_timing(:run_all_cleaners, timing)
     end
   end
 end
