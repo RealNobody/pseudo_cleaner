@@ -32,13 +32,13 @@ RSpec.configure do |config|
       clean_example = example
       clean_example = example.example if example.respond_to?(:example)
 
-      new_strategy = example.metadata[:strategy]
+      new_strategy = clean_example.metadata[:strategy]
 
       if new_strategy && !PseudoCleaner::MasterCleaner::CLEANING_STRATEGIES.include?(new_strategy)
-        PseudoCleaner::Logger.write "*** Unknown/invalid cleaning strategy #{example.metadata[:strategy]}.  Using default: :transaction ***".red.on_light_white
+        PseudoCleaner::Logger.write "*** Unknown/invalid cleaning strategy #{clean_example.metadata[:strategy]}.  Using default: :transaction ***".red.on_light_white
         new_strategy = :transaction
       end
-      if example.metadata[:js]
+      if clean_example.metadata[:js]
         new_strategy ||= :pseudo_delete
         new_strategy = :pseudo_delete if new_strategy == :transaction
       end
