@@ -26,7 +26,8 @@ module PseudoCleaner
 
       @options[:table_start_method] ||= start_method
       @options[:table_end_method]   ||= end_method
-      @options[:output_diagnostics] ||= PseudoCleaner::Configuration.current_instance.output_diagnostics
+      @options[:output_diagnostics] ||= PseudoCleaner::Configuration.current_instance.output_diagnostics ||
+          PseudoCleaner::Configuration.current_instance.post_transaction_analysis
 
       unless initial_state.has_key?(:table_is_active_record)
         initial_state[:table_is_active_record] = false
@@ -199,7 +200,7 @@ module PseudoCleaner
         end
       end
 
-      if test_strategy == :pseudo_delete
+      if test_strategy == :pseudo_delete || PseudoCleaner::Configuration.current_instance.post_transaction_analysis
         initial_state = @@initial_states[@table]
 
         # we should check the relationships for any records which still refer to
@@ -237,9 +238,7 @@ module PseudoCleaner
         if num_deleted > 0
           cleaned_table = true
 
-          if @options[:output_diagnostics]
-            PseudoCleaner::Logger.write("    Deleted #{num_deleted} records by ID.")
-          end
+          output_delete_record(test_strategy, "    Deleted #{num_deleted} records by ID.")
         end
       end
 
@@ -250,9 +249,7 @@ module PseudoCleaner
         if num_deleted > 0
           cleaned_table = true
 
-          if @options[:output_diagnostics]
-            PseudoCleaner::Logger.write("    Deleted #{num_deleted} records by #{initial_state[:created][:column_name]}.")
-          end
+          output_delete_record(test_strategy, "    Deleted #{num_deleted} records by #{initial_state[:created][:column_name]}.")
         end
       end
 
@@ -265,7 +262,7 @@ module PseudoCleaner
           initial_state[:updated][:value] = ActiveRecord::Base.connection.execute("SELECT MAX(#{initial_state[:updated][:column_name]}) FROM `#{table_name}`").first[0]
 
           PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
-          PseudoCleaner::Logger.write("    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
+          output_delete_record(test_strategy, "    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
         end
       end
 
@@ -275,9 +272,7 @@ module PseudoCleaner
           cleaned_table = true
 
           DatabaseCleaner.clean_with(:truncation, only: [initial_state[:table_name]])
-          if @options[:output_diagnostics]
-            PseudoCleaner::Logger.write("    Deleted #{final_count} records by cleaning the table.") if final_count > 0
-          end
+          output_delete_record(test_strategy, "    Deleted #{final_count} records by cleaning the table.") if final_count > 0
 
           final_count = ActiveRecord::Base.connection.execute("SELECT COUNT(*) FROM `#{table_name}`").first[0]
         end
@@ -285,7 +280,9 @@ module PseudoCleaner
 
       if initial_state[:count] != final_count
         PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
-        PseudoCleaner::Logger.write("    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
+        output_delete_record(test_strategy,
+                             "    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white,
+                             true)
 
         initial_state[:count] = final_count
         cleaned_table         = true
@@ -307,9 +304,7 @@ module PseudoCleaner
         if num_deleted > 0
           cleaned_table = true
 
-          if @options[:output_diagnostics]
-            PseudoCleaner::Logger.write("    Deleted #{num_deleted} records by ID.")
-          end
+          output_delete_record(test_strategy, "    Deleted #{num_deleted} records by ID.")
         end
       end
 
@@ -321,9 +316,7 @@ module PseudoCleaner
         if num_deleted > 0
           cleaned_table = true
 
-          if @options[:output_diagnostics]
-            PseudoCleaner::Logger.write("    Deleted #{num_deleted} records by #{initial_state[:created][:column_name]}.")
-          end
+          output_delete_record(test_strategy, "    Deleted #{num_deleted} records by #{initial_state[:created][:column_name]}.")
         end
       end
 
@@ -339,7 +332,7 @@ module PseudoCleaner
           initial_state[:updated][:value] = access_table.unfiltered.max(initial_state[:updated][:column_name])
 
           PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
-          PseudoCleaner::Logger.write("    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
+          output_delete_record(test_strategy, "    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
         end
       end
 
@@ -349,9 +342,7 @@ module PseudoCleaner
           cleaned_table = true
 
           DatabaseCleaner.clean_with(:truncation, only: [initial_state[:table_name]])
-          if @options[:output_diagnostics]
-            PseudoCleaner::Logger.write("    Deleted #{final_count} records by cleaning the table.") if final_count > 0
-          end
+          output_delete_record(test_strategy, "    Deleted #{final_count} records by cleaning the table.") if final_count > 0
 
           final_count = access_table.unfiltered.count
         end
@@ -359,7 +350,9 @@ module PseudoCleaner
 
       if initial_state[:count] != final_count
         PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
-        PseudoCleaner::Logger.write("    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
+        output_delete_record(test_strategy,
+                             "    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white,
+                             true)
 
         initial_state[:count] = final_count
         cleaned_table         = true
@@ -368,6 +361,13 @@ module PseudoCleaner
       if cleaned_table
         reset_auto_increment true
       end
+    end
+
+    def output_delete_record(test_strategy, stats_string, require_output = false)
+      if test_strategy == :transaction
+        PseudoCleaner::Logger.write("    ***** TRANSACTION FAILED!!! *****".red.on_light_white)
+      end
+      PseudoCleaner::Logger.write(stats_string) if @options[:output_diagnostics] || require_output
     end
 
     def reset_auto_increment test_start

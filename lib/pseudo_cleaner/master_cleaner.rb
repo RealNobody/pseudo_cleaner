@@ -316,7 +316,8 @@ module PseudoCleaner
 
     def end(options = {})
       test_type = options[:test_type] || @test_type
-      if PseudoCleaner::Configuration.current_instance.output_diagnostics
+      if PseudoCleaner::Configuration.current_instance.output_diagnostics ||
+          PseudoCleaner::Configuration.current_instance.post_transaction_analysis
         PseudoCleaner::Logger.write("Cleaning #{test_type}")
       end
       end_all_cleaners options

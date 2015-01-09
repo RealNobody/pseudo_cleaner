@@ -11,6 +11,7 @@ module PseudoCleaner
     attr_accessor :clean_database_before_tests
     attr_accessor :reset_auto_increment
     attr_accessor :single_cleaner_set
+    attr_accessor :post_transaction_analysis
 
     def self.current_instance
       @@current_instance ||= PseudoCleaner::Configuration.new
@@ -21,6 +22,7 @@ module PseudoCleaner
       @clean_database_before_tests = false  # false because I think it will annoy developers...
       @reset_auto_increment = true          # true because I think it should be done
       @single_cleaner_set = true            # true because I hope it will improve performance
+      @post_transaction_analysis = false    # should only be set true if you are searching for a problem
     end
   end
 end
