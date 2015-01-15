@@ -443,15 +443,24 @@ module PseudoCleaner
       if symbol_table?
         Sequel::DATABASES[0][table]
       else
-        table.dataset
+        # table.dataset
+        if sequel_model_table_name
+          Sequel::DATABASES[0][sequel_model_table_name.gsub(/`([^`]+)`/, "\\1").to_sym]
+        else
+          table.dataset
+        end
       end
     end
 
     def sequel_model_table_name
       if symbol_table?
         "`#{table}`"
-      else
+      elsif table.simple_table
         table.simple_table
+      elsif table.table_name
+        "`#{table.table_name}`"
+      else
+        nil
       end
     end
   end
