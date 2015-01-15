@@ -298,68 +298,70 @@ module PseudoCleaner
       access_table  = sequel_model_table
       cleaned_table = false
 
-      if initial_state[:max_id]
-        the_max     = initial_state[:max_id] || 0
-        num_deleted = access_table.unfiltered.where { id > the_max }.delete
-        if num_deleted > 0
-          cleaned_table = true
+      if access_table
+        if initial_state[:max_id]
+          the_max     = initial_state[:max_id] || 0
+          num_deleted = access_table.unfiltered.where { id > the_max }.delete
+          if num_deleted > 0
+            cleaned_table = true
 
-          output_delete_record(test_strategy, "    Deleted #{num_deleted} records by ID.")
+            output_delete_record(test_strategy, "    Deleted #{num_deleted} records by ID.")
+          end
         end
-      end
 
-      if initial_state[:created]
-        num_deleted = access_table.
-            unfiltered.
-            where("`#{initial_state[:created][:column_name]}` > ?", initial_state[:created][:value]).
-            delete
-        if num_deleted > 0
-          cleaned_table = true
+        if initial_state[:created]
+          num_deleted = access_table.
+              unfiltered.
+              where("`#{initial_state[:created][:column_name]}` > ?", initial_state[:created][:value]).
+              delete
+          if num_deleted > 0
+            cleaned_table = true
 
-          output_delete_record(test_strategy, "    Deleted #{num_deleted} records by #{initial_state[:created][:column_name]}.")
+            output_delete_record(test_strategy, "    Deleted #{num_deleted} records by #{initial_state[:created][:column_name]}.")
+          end
         end
-      end
 
-      if initial_state[:updated]
-        dirty_count = access_table.
-            unfiltered.
-            where("`#{initial_state[:updated][:column_name]}` > ?", initial_state[:updated][:value]).
-            count
+        if initial_state[:updated]
+          dirty_count = access_table.
+              unfiltered.
+              where("`#{initial_state[:updated][:column_name]}` > ?", initial_state[:updated][:value]).
+              count
 
-        if @options[:output_diagnostics] && dirty_count > 0
-          # cleaned_table = true
+          if @options[:output_diagnostics] && dirty_count > 0
+            # cleaned_table = true
 
-          initial_state[:updated][:value] = access_table.unfiltered.max(initial_state[:updated][:column_name])
+            initial_state[:updated][:value] = access_table.unfiltered.max(initial_state[:updated][:column_name])
 
+            PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
+            output_delete_record(test_strategy, "    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
+          end
+        end
+
+        final_count = access_table.unfiltered.count
+        if initial_state[:count] == 0
+          if initial_state[:blank]
+            cleaned_table = true
+
+            DatabaseCleaner.clean_with(:truncation, only: [initial_state[:table_name]])
+            output_delete_record(test_strategy, "    Deleted #{final_count} records by cleaning the table.") if final_count > 0
+
+            final_count = access_table.unfiltered.count
+          end
+        end
+
+        if initial_state[:count] != final_count
           PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
-          output_delete_record(test_strategy, "    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
+          output_delete_record(test_strategy,
+                               "    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white,
+                               true)
+
+          initial_state[:count] = final_count
+          cleaned_table         = true
         end
-      end
 
-      final_count = access_table.unfiltered.count
-      if initial_state[:count] == 0
-        if initial_state[:blank]
-          cleaned_table = true
-
-          DatabaseCleaner.clean_with(:truncation, only: [initial_state[:table_name]])
-          output_delete_record(test_strategy, "    Deleted #{final_count} records by cleaning the table.") if final_count > 0
-
-          final_count = access_table.unfiltered.count
+        if cleaned_table
+          reset_auto_increment true
         end
-      end
-
-      if initial_state[:count] != final_count
-        PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
-        output_delete_record(test_strategy,
-                             "    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white,
-                             true)
-
-        initial_state[:count] = final_count
-        cleaned_table         = true
-      end
-
-      if cleaned_table
-        reset_auto_increment true
       end
     end
 
@@ -440,16 +442,23 @@ module PseudoCleaner
     end
 
     def sequel_model_table
+      table_dataset = nil
+
       if symbol_table?
-        Sequel::DATABASES[0][table]
+        table_dataset = Sequel::DATABASES[0][table]
       else
-        # table.dataset
         if sequel_model_table_name
-          Sequel::DATABASES[0][sequel_model_table_name.gsub(/`([^`]+)`/, "\\1").to_sym]
-        else
-          table.dataset
+          table_dataset = Sequel::DATABASES[0][sequel_model_table_name.gsub(/`([^`]+)`/, "\\1").to_sym]
+        end
+        unless table_dataset && table_dataset.is_a?(Sequel::Mysql2::Dataset)
+          table_dataset = table.dataset
         end
       end
+      unless table_dataset && table_dataset.is_a?(Sequel::Mysql2::Dataset)
+        table_dataset = nil
+      end
+
+      table_dataset
     end
 
     def sequel_model_table_name
