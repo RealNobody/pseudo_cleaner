@@ -39,7 +39,13 @@ module PseudoCleaner
 
           DatabaseCleaner.strategy = PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES[strategy]
           unless [:pseudo_delete].include? strategy
-            DatabaseCleaner.start
+            if Object.const_defined?("ActiveRecord", false) && ActiveRecord.const_defined?("Base", false)
+              DatabaseCleaner[:active_record, connection: PseudoCleaner::Configuration.db_connection(:active_record)].
+                  start
+            elsif Object.const_defined?("Sequel", false) && Sequel.const_defined?("Model", false)
+              DatabaseCleaner[:sequel, connection: PseudoCleaner::Configuration.db_connection(:sequel)].start
+            end
+            # DatabaseCleaner.start
           end
 
           pseudo_cleaner_data[:pseudo_state] = PseudoCleaner::MasterCleaner.start_test strategy
@@ -53,7 +59,13 @@ module PseudoCleaner
 
         unless pseudo_cleaner_data[:test_strategy] == :none
           unless [:pseudo_delete].include? pseudo_cleaner_data[:test_strategy]
-            DatabaseCleaner.clean
+            if Object.const_defined?("ActiveRecord", false) && ActiveRecord.const_defined?("Base", false)
+              DatabaseCleaner[:active_record, connection: PseudoCleaner::Configuration.db_connection(:active_record)].
+                  clean
+            elsif Object.const_defined?("Sequel", false) && Sequel.const_defined?("Model", false)
+              DatabaseCleaner[:sequel, connection: PseudoCleaner::Configuration.db_connection(:sequel)].clean
+            end
+            # DatabaseCleaner.clean
           end
 
           case pseudo_cleaner_data[:test_strategy]
@@ -114,7 +126,7 @@ module PseudoCleaner
 
       def seed_data
         PseudoCleaner::Logger.write("Re-seeding database".red.on_light_white)
-        Seedling::Seeder.seed_all
+        Seedling::Seeder.seed_all(PseudoCleaner::Configuration.db_connection(nil))
       end
 
       def process_exception(error)
@@ -187,14 +199,14 @@ module PseudoCleaner
       end
 
       def create_table_cleaners(options = {})
-        Seedling::Seeder.create_order.each do |table|
+        Seedling::Seeder.create_order(PseudoCleaner::Configuration.db_connection(nil)).each do |table|
           cleaner_class = PseudoCleaner::MasterCleaner.cleaner_class(table.name)
           if cleaner_class
             PseudoCleaner::MasterCleaner.cleaner_classes << [table, nil, cleaner_class]
           end
         end
         if Seedling::Seeder.respond_to?(:unclassed_tables)
-          Seedling::Seeder.unclassed_tables.each do |table_name|
+          Seedling::Seeder.unclassed_tables(PseudoCleaner::Configuration.db_connection(nil)).each do |table_name|
             cleaner_class = PseudoCleaner::MasterCleaner.cleaner_class(table_name)
             if cleaner_class
               PseudoCleaner::MasterCleaner.cleaner_classes << [nil, table_name, cleaner_class]
@@ -254,6 +266,10 @@ module PseudoCleaner
         end
 
         return check_class, full_module_name
+      end
+
+      def review_rows(&block)
+        @@suite_cleaner.review_rows &block
       end
     end
 
@@ -339,13 +355,13 @@ module PseudoCleaner
       run_all_cleaners(:reset_suite, @cleaners.reverse)
     end
 
-    def run_all_cleaners(cleaner_function, cleaners, *args)
+    def run_all_cleaners(cleaner_function, cleaners, *args, &block)
       last_error = nil
 
       cleaners.each do |cleaner|
         begin
           if cleaner.respond_to?(cleaner_function)
-            cleaner.send(cleaner_function, *args)
+            cleaner.send(cleaner_function, *args, &block)
           end
         rescue => error
           PseudoCleaner::MasterCleaner.process_exception(last_error) if last_error
@@ -355,6 +371,10 @@ module PseudoCleaner
       end
 
       raise last_error if last_error
+    end
+
+    def review_rows(&block)
+      run_all_cleaners(:review_rows, @cleaners, &block)
     end
   end
 end

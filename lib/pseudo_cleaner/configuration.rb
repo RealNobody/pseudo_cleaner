@@ -24,5 +24,21 @@ module PseudoCleaner
       @single_cleaner_set = true            # true because I hope it will improve performance
       @post_transaction_analysis = false    # should only be set true if you are searching for a problem
     end
+
+    def self.db_connection=(connection)
+      @db_connection = connection
+    end
+
+    def self.db_connection(type)
+      if @db_connection || type.nil?
+        @db_connection
+      else
+        if type == :sequel
+          Sequel::DATABASES[0]
+        else
+          ActiveRecord::Base
+        end
+      end
+    end
   end
 end

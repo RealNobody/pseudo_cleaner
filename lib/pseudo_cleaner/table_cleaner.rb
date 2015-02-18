@@ -53,7 +53,7 @@ module PseudoCleaner
 
         if Object.const_defined?("Sequel", false) && Sequel.const_defined?("Model", false)
           if symbol_table?
-            initial_state[:table_is_sequel_model] = Sequel::DATABASES[0][table]
+            initial_state[:table_is_sequel_model] = PseudoCleaner::Configuration.db_connection(:sequel)[table]
             initial_state[:table_name]            = table
           else
             table_super_class = table.superclass
@@ -122,8 +122,9 @@ module PseudoCleaner
       new_state = {}
 
       table_name = active_record_table
-      if ActiveRecord::Base.connection.columns(table_name).find { |column| column.name == "id" }
-        new_state[:max_id] = ActiveRecord::Base.connection.execute("SELECT MAX(`id`) FROM `#{table_name}`").first[0] || 0
+      if PseudoCleaner::Configuration.db_connection(:active_record).connection.columns(table_name).find { |column| column.name == "id" }
+        new_state[:max_id] = PseudoCleaner::Configuration.db_connection(:active_record).connection.
+            execute("SELECT MAX(`id`) FROM `#{table_name}`").first[0] || 0
         PseudoCleaner::Logger.write("    max(id) = #{new_state[:max_id]}") if @options[:output_diagnostics]
       end
 
@@ -131,10 +132,12 @@ module PseudoCleaner
         [:at, :on].each do |verb_name|
           date_column_name = "#{date_name}_#{verb_name}"
 
-          if ActiveRecord::Base.connection.columns(table_name).find { |column| column.name == date_column_name }
+          if PseudoCleaner::Configuration.db_connection(:active_record).connection.
+              columns(table_name).find { |column| column.name == date_column_name }
             new_state[date_name] = {
                 column_name: date_column_name,
-                value:       ActiveRecord::Base.connection.execute("SELECT MAX(`#{date_column_name}`) FROM `#{table_name}`").first[0] ||
+                value:       PseudoCleaner::Configuration.db_connection(:active_record).connection.
+                    execute("SELECT MAX(`#{date_column_name}`) FROM `#{table_name}`").first[0] ||
                                  Time.now - 1.second
             }
             if @options[:output_diagnostics]
@@ -147,7 +150,8 @@ module PseudoCleaner
       end
 
       new_state[:blank] = new_state.blank?
-      new_state[:count] = ActiveRecord::Base.connection.execute("SELECT COUNT(*) FROM `#{table_name}`").first[0]
+      new_state[:count] = PseudoCleaner::Configuration.db_connection(:active_record).connection.
+          execute("SELECT COUNT(*) FROM `#{table_name}`").first[0]
 
       @@initial_states[@table] = @@initial_states[@table].merge new_state
     end
@@ -232,8 +236,9 @@ module PseudoCleaner
       if initial_state[:max_id]
         the_max = initial_state[:max_id] || 0
 
-        ActiveRecord::Base.connection.execute("DELETE FROM `#{table_name}` WHERE id > #{the_max}")
-        num_deleted = ActiveRecord::Base.connection.raw_connection.affected_rows
+        PseudoCleaner::Configuration.db_connection(:active_record).connection.
+            execute("DELETE FROM `#{table_name}` WHERE id > #{the_max}")
+        num_deleted = PseudoCleaner::Configuration.db_connection(:active_record).connection.raw_connection.affected_rows
 
         if num_deleted > 0
           cleaned_table = true
@@ -243,8 +248,9 @@ module PseudoCleaner
       end
 
       if initial_state[:created]
-        ActiveRecord::Base.connection.execute("DELETE FROM `#{table_name}` WHERE #{initial_state[:created][:column_name]} > '#{initial_state[:created][:value]}'")
-        num_deleted = ActiveRecord::Base.connection.raw_connection.affected_rows
+        PseudoCleaner::Configuration.db_connection(:active_record).connection.
+            execute("DELETE FROM `#{table_name}` WHERE #{initial_state[:created][:column_name]} > '#{initial_state[:created][:value]}'")
+        num_deleted = PseudoCleaner::Configuration.db_connection(:active_record).connection.raw_connection.affected_rows
 
         if num_deleted > 0
           cleaned_table = true
@@ -254,27 +260,32 @@ module PseudoCleaner
       end
 
       if initial_state[:updated]
-        dirty_count = ActiveRecord::Base.connection.execute("SELECT COUNT(*) FROM `#{table_name}` WHERE #{initial_state[:updated][:column_name]} > '#{initial_state[:updated][:value]}'").first[0]
+        dirty_count = PseudoCleaner::Configuration.db_connection(:active_record).connection.
+            execute("SELECT COUNT(*) FROM `#{table_name}` WHERE #{initial_state[:updated][:column_name]} > '#{initial_state[:updated][:value]}'").first[0]
 
         if @options[:output_diagnostics] && dirty_count > 0
           # cleaned_table = true
 
-          initial_state[:updated][:value] = ActiveRecord::Base.connection.execute("SELECT MAX(#{initial_state[:updated][:column_name]}) FROM `#{table_name}`").first[0]
+          initial_state[:updated][:value] = PseudoCleaner::Configuration.db_connection(:active_record).connection.
+              execute("SELECT MAX(#{initial_state[:updated][:column_name]}) FROM `#{table_name}`").first[0]
 
           PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
           output_delete_record(test_strategy, "    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
         end
       end
 
-      final_count = ActiveRecord::Base.connection.execute("SELECT COUNT(*) FROM `#{table_name}`").first[0]
+      final_count = PseudoCleaner::Configuration.db_connection(:active_record).connection.
+          execute("SELECT COUNT(*) FROM `#{table_name}`").first[0]
       if initial_state[:count] == 0
         if initial_state[:blank]
           cleaned_table = true
 
-          DatabaseCleaner.clean_with(:truncation, only: [initial_state[:table_name]])
+          DatabaseCleaner[:active_record, connection: PseudoCleaner::Configuration.db_connection(:active_record)].
+              clean_with(:truncation, only: [initial_state[:table_name]])
           output_delete_record(test_strategy, "    Deleted #{final_count} records by cleaning the table.") if final_count > 0
 
-          final_count = ActiveRecord::Base.connection.execute("SELECT COUNT(*) FROM `#{table_name}`").first[0]
+          final_count = PseudoCleaner::Configuration.db_connection(:active_record).connection.
+              execute("SELECT COUNT(*) FROM `#{table_name}`").first[0]
         end
       end
 
@@ -342,7 +353,8 @@ module PseudoCleaner
           if initial_state[:blank]
             cleaned_table = true
 
-            DatabaseCleaner.clean_with(:truncation, only: [initial_state[:table_name]])
+            DatabaseCleaner[:sequel, connection: PseudoCleaner::Configuration.db_connection(:sequel)].
+                clean_with(:truncation, only: [initial_state[:table_name]])
             output_delete_record(test_strategy, "    Deleted #{final_count} records by cleaning the table.") if final_count > 0
 
             final_count = access_table.unfiltered.count
@@ -397,7 +409,8 @@ module PseudoCleaner
             PseudoCleaner::Logger.write("    ALTER TABLE #{table_name} AUTO_INCREMENT = #{initial_state[:max_id] + 1}")
           end
 
-          ActiveRecord::Base.connection.execute("ALTER TABLE #{table_name} AUTO_INCREMENT = #{initial_state[:max_id] + 1}")
+          PseudoCleaner::Configuration.db_connection(:active_record).connection.
+              execute("ALTER TABLE #{table_name} AUTO_INCREMENT = #{initial_state[:max_id] + 1}")
         end
       end
     end
@@ -413,7 +426,7 @@ module PseudoCleaner
             PseudoCleaner::Logger.write("    ALTER TABLE #{table_name} AUTO_INCREMENT = #{initial_state[:max_id] + 1}")
           end
 
-          Sequel::DATABASES[0]["ALTER TABLE #{table_name} AUTO_INCREMENT = #{initial_state[:max_id] + 1}"].first
+          PseudoCleaner::Configuration.db_connection(:sequel)["ALTER TABLE #{table_name} AUTO_INCREMENT = #{initial_state[:max_id] + 1}"].first
         end
       end
     end
@@ -445,10 +458,10 @@ module PseudoCleaner
       table_dataset = nil
 
       if symbol_table?
-        table_dataset = Sequel::DATABASES[0][table]
+        table_dataset = PseudoCleaner::Configuration.db_connection(:sequel)[table]
       else
         if sequel_model_table_name
-          table_dataset = Sequel::DATABASES[0][sequel_model_table_name.gsub(/`([^`]+)`/, "\\1").to_sym]
+          table_dataset = PseudoCleaner::Configuration.db_connection(:sequel)[sequel_model_table_name.gsub(/`([^`]+)`/, "\\1").to_sym]
         end
         unless table_dataset && table_dataset.is_a?(Sequel::Mysql2::Dataset)
           table_dataset = table.dataset
@@ -470,6 +483,74 @@ module PseudoCleaner
         "`#{table.table_name}`"
       else
         nil
+      end
+    end
+
+    def review_rows(&block)
+      initial_state = @@initial_states[@table]
+
+      if initial_state[:table_is_active_record]
+        review_rows_active_record &block
+      end
+
+      if initial_state[:table_is_sequel_model]
+        review_rows_sequel_model &block
+      end
+    end
+
+    def review_rows_active_record(&block)
+      initial_state  = @@initial_states[@table]
+      table_name     = active_record_table
+      dataset_sequel = nil
+
+      if initial_state[:max_id]
+        the_max = initial_state[:max_id] || 0
+
+        dataset_sequel = "SELECT * FROM `#{table_name}` WHERE id > #{the_max}"
+      elsif initial_state[:created]
+        dataset_sequel = "SELECT * FROM `#{table_name}` WHERE #{initial_state[:created][:column_name]} > '#{initial_state[:created][:value]}'"
+      elsif initial_state[:updated]
+        dataset_sequel = "SELECT * FROM `#{table_name}` WHERE #{initial_state[:updated][:column_name]} > '#{initial_state[:updated][:value]}'"
+      elsif initial_state[:count]
+        dataset_sequel = "SELECT * FROM `#{table_name}` LIMIT 99 OFFSET #{initial_state[:count]}"
+      end
+
+      columns = GalaxyDbInjector::Base.connection.columns(table_name)
+      GalaxyDbInjector::Base.connection.execute(dataset_sequel).each do |row|
+        col_index = 0
+        data_hash = columns.reduce({}) do |hash, column_name|
+          hash[column_name.name] = row[col_index]
+          col_index         += 1
+
+          hash
+        end
+
+        block.yield table_name, data_hash
+      end
+    end
+
+    def review_rows_sequel_model(&block)
+      initial_state = @@initial_states[@table]
+      dataset       = nil
+
+      if initial_state[:max_id]
+        dataset = sequel_model_table.unfiltered.where { id > initial_state[:max_id] || 0 }
+      elsif initial_state[:created]
+        dataset = sequel_model_table.
+            unfiltered.
+            where("`#{initial_state[:created][:column_name]}` > ?", initial_state[:created][:value])
+      elsif initial_state[:updated]
+        dataset = sequel_model_table.
+            unfiltered.
+            where("`#{initial_state[:updated][:column_name]}` > ?", initial_state[:created][:value])
+      elsif initial_state[:count]
+        dataset = sequel_model_table.unfiltered.offset(initial_state[:count]).limit(99)
+      end
+
+      if dataset
+        dataset.each do |row|
+          block.yield sequel_model_table_name, row
+        end
       end
     end
   end
