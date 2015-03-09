@@ -19,6 +19,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_runtime_dependency "colorize"
+  spec.add_runtime_dependency "sorted_seeder"
   spec.add_runtime_dependency "database_cleaner"
 
   spec.add_development_dependency "bundler", "~> 1.3"
