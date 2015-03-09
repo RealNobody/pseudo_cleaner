@@ -27,9 +27,9 @@ tables again and deletes anything that is new.  It will then report (optionally)
 updated but haven't been cleaned up.  In future versions, I have plans for it to also report (optionally) on any
 referential integrity holes.
 
-Because the PsuedoCleaner already uses the [Seedling gem](https://github.com/RealNobody/seedling) to determine what
+Because the PsuedoCleaner already uses the [SortedSeeder gem](https://github.com/RealNobody/sorted_seeder) to determine what
 order to delete records in when cleaning up, when the database is truncated, it will re-seed the database using the
-Seedlings seed_all function.
+SortedSeeders seed_all function.
 
 ## Installation
 

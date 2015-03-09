@@ -1,4 +1,4 @@
-require "seedling"
+require "sorted_seeder"
 
 module PseudoCleaner
   class MasterCleaner
@@ -126,7 +126,7 @@ module PseudoCleaner
 
       def seed_data
         PseudoCleaner::Logger.write("Re-seeding database".red.on_light_white)
-        Seedling::Seeder.seed_all(PseudoCleaner::Configuration.db_connection(nil))
+        SortedSeeder::Seeder.seed_all(PseudoCleaner::Configuration.db_connection(nil))
       end
 
       def process_exception(error)
@@ -199,14 +199,14 @@ module PseudoCleaner
       end
 
       def create_table_cleaners(options = {})
-        Seedling::Seeder.create_order(PseudoCleaner::Configuration.db_connection(nil)).each do |table|
+        SortedSeeder::Seeder.create_order(PseudoCleaner::Configuration.db_connection(nil)).each do |table|
           cleaner_class = PseudoCleaner::MasterCleaner.cleaner_class(table.name)
           if cleaner_class
             PseudoCleaner::MasterCleaner.cleaner_classes << [table, nil, cleaner_class]
           end
         end
-        if Seedling::Seeder.respond_to?(:unclassed_tables)
-          Seedling::Seeder.unclassed_tables(PseudoCleaner::Configuration.db_connection(nil)).each do |table_name|
+        if SortedSeeder::Seeder.respond_to?(:unclassed_tables)
+          SortedSeeder::Seeder.unclassed_tables(PseudoCleaner::Configuration.db_connection(nil)).each do |table_name|
             cleaner_class = PseudoCleaner::MasterCleaner.cleaner_class(table_name)
             if cleaner_class
               PseudoCleaner::MasterCleaner.cleaner_classes << [nil, table_name, cleaner_class]
@@ -302,7 +302,7 @@ module PseudoCleaner
         end
 
         unless @@cleaner_classes_sorted
-          seed_sorts = @cleaners.map { |cleaner| Seedling::Seeder::SeederSorter.new(cleaner) }
+          seed_sorts = @cleaners.map { |cleaner| SortedSeeder::Seeder::SeederSorter.new(cleaner) }
           seed_sorts.sort!
 
           @cleaners = seed_sorts.map(&:seed_base_object)

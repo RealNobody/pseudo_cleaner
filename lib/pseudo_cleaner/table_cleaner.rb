@@ -435,7 +435,7 @@ module PseudoCleaner
       if (other_object.is_a?(PseudoCleaner::TableCleaner))
         return 0 if other_object.table == self.table
 
-        Seedling::Seeder.create_order.each do |create_table|
+        SortedSeeder::Seeder.create_order.each do |create_table|
           if create_table == self.table
             return -1
           elsif create_table == other_object.table
