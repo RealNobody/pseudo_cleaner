@@ -515,12 +515,12 @@ module PseudoCleaner
         dataset_sequel = "SELECT * FROM `#{table_name}` LIMIT 99 OFFSET #{initial_state[:count]}"
       end
 
-      columns = GalaxyDbInjector::Base.connection.columns(table_name)
-      GalaxyDbInjector::Base.connection.execute(dataset_sequel).each do |row|
+      columns = PseudoCleaner::Configuration.db_connection(:active_record).connection.columns(table_name)
+      PseudoCleaner::Configuration.db_connection(:active_record).connection.execute(dataset_sequel).each do |row|
         col_index = 0
         data_hash = columns.reduce({}) do |hash, column_name|
           hash[column_name.name] = row[col_index]
-          col_index         += 1
+          col_index              += 1
 
           hash
         end
