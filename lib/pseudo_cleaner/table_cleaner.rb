@@ -544,12 +544,12 @@ module PseudoCleaner
             unfiltered.
             where("`#{initial_state[:updated][:column_name]}` > ?", initial_state[:created][:value])
       elsif initial_state[:count]
-        dataset = sequel_model_table.unfiltered.offset(initial_state[:count]).limit(99)
+        dataset = sequel_model_table.unfiltered.limit(99, initial_state[:count])
       end
 
       if dataset
         dataset.each do |row|
-          block.yield sequel_model_table_name, row
+          block.yield sequel_model_table_name.gsub(/`([^`]+)`/, "\\1"), row
         end
       end
     end
