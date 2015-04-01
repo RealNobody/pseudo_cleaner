@@ -18,11 +18,11 @@ module PseudoCleaner
     end
 
     def initialize
-      @output_diagnostics = false           # false to keep the noise level down...
+      @output_diagnostics          = false  # false to keep the noise level down...
       @clean_database_before_tests = false  # false because I think it will annoy developers...
-      @reset_auto_increment = true          # true because I think it should be done
-      @single_cleaner_set = true            # true because I hope it will improve performance
-      @post_transaction_analysis = false    # should only be set true if you are searching for a problem
+      @reset_auto_increment        = true   # true because I think it should be done
+      @single_cleaner_set          = true   # true because I hope it will improve performance
+      @post_transaction_analysis   = false  # should only be set true if you are searching for a problem
     end
 
     def self.db_connection=(connection)
