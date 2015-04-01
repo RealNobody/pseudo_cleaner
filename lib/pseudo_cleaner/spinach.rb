@@ -2,7 +2,7 @@ first_test_run = false
 
 # I haven't tested this fully yet, but I think that this should work.
 
-Spinach.hooks.before_scenario do |scenario, step_definitions|
+Spinach.hooks.around_scenario do |scenario_data, step_definitions, &block|
   unless first_test_run
     first_test_run = true
     # before tests run...
@@ -26,10 +26,12 @@ Spinach.hooks.before_scenario do |scenario, step_definitions|
                :pseudo_delete
              end
   PseudoCleaner::MasterCleaner.start_example(scenario, strategy)
-end
 
-Spinach.hooks.after_scenario do |scenario, step_definitions|
-  PseudoCleaner::MasterCleaner.end_example(scenario)
+  begin
+    block.call
+  ensure
+    PseudoCleaner::MasterCleaner.end_example(scenario)
+  end
 end
 
 Spinach.hooks.after_run do |status|

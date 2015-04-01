@@ -15,31 +15,30 @@ RSpec.configure do |config|
     PseudoCleaner::MasterCleaner.end_suite
   end
 
-  config.before(:each) do |example|
+  config.around(:each) do |example|
+    test_example = example.example if example.respond_to?(:example)
+    test_example ||= self.example if self.respond_to?(:example)
+
     new_strategy = nil
 
-    clean_example = example
-    clean_example = example.example if example.respond_to?(:example)
-
-    new_strategy = clean_example.metadata[:strategy]
+    new_strategy = test_example.metadata[:strategy]
 
     if new_strategy && !PseudoCleaner::MasterCleaner::CLEANING_STRATEGIES.include?(new_strategy)
-      PseudoCleaner::Logger.write "*** Unknown/invalid cleaning strategy #{clean_example.metadata[:strategy]}.  Using default: :transaction ***".red.on_light_white
+      PseudoCleaner::Logger.write "*** Unknown/invalid cleaning strategy #{test_example.metadata[:strategy]}.  Using default: :transaction ***".red.on_light_white
       new_strategy = :transaction
     end
-    if clean_example.metadata[:js]
+    if test_example.metadata[:js]
       new_strategy ||= :pseudo_delete
       new_strategy = :pseudo_delete if new_strategy == :transaction
     end
     new_strategy ||= :transaction
 
-    PseudoCleaner::MasterCleaner.start_example(clean_example, new_strategy)
-  end
+    PseudoCleaner::MasterCleaner.start_example(test_example, new_strategy)
 
-  config.after(:each) do |example|
-    clean_example = example
-    clean_example = example.example if example.respond_to?(:example)
-
-    PseudoCleaner::MasterCleaner.end_example(clean_example)
+    begin
+      example.run
+    ensure
+      PseudoCleaner::MasterCleaner.end_example(test_example)
+    end
   end
 end
