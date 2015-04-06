@@ -30,6 +30,14 @@ module PseudoCleaner
         @@suite_cleaner
       end
 
+      def database_cleaner
+        if Object.const_defined?("ActiveRecord", false) && ActiveRecord.const_defined?("Base", false)
+          DatabaseCleaner[:active_record, connection: PseudoCleaner::Configuration.db_connection(:active_record)]
+        elsif Object.const_defined?("Sequel", false) && Sequel.const_defined?("Model", false)
+          DatabaseCleaner[:sequel, connection: PseudoCleaner::Configuration.db_connection(:sequel)]
+        end
+      end
+
       def start_example(example_class, strategy)
         pseudo_cleaner_data                 = {}
         pseudo_cleaner_data[:test_strategy] = strategy
@@ -39,13 +47,7 @@ module PseudoCleaner
 
           DatabaseCleaner.strategy = PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES[strategy]
           unless [:pseudo_delete].include? strategy
-            if Object.const_defined?("ActiveRecord", false) && ActiveRecord.const_defined?("Base", false)
-              DatabaseCleaner[:active_record, connection: PseudoCleaner::Configuration.db_connection(:active_record)].
-                  start
-            elsif Object.const_defined?("Sequel", false) && Sequel.const_defined?("Model", false)
-              DatabaseCleaner[:sequel, connection: PseudoCleaner::Configuration.db_connection(:sequel)].start
-            end
-            # DatabaseCleaner.start
+            PseudoCleaner::MasterCleaner.database_cleaner.start
           end
 
           pseudo_cleaner_data[:pseudo_state] = PseudoCleaner::MasterCleaner.start_test strategy
@@ -59,13 +61,7 @@ module PseudoCleaner
 
         unless pseudo_cleaner_data[:test_strategy] == :none
           unless [:pseudo_delete].include? pseudo_cleaner_data[:test_strategy]
-            if Object.const_defined?("ActiveRecord", false) && ActiveRecord.const_defined?("Base", false)
-              DatabaseCleaner[:active_record, connection: PseudoCleaner::Configuration.db_connection(:active_record)].
-                  clean
-            elsif Object.const_defined?("Sequel", false) && Sequel.const_defined?("Model", false)
-              DatabaseCleaner[:sequel, connection: PseudoCleaner::Configuration.db_connection(:sequel)].clean
-            end
-            # DatabaseCleaner.clean
+            PseudoCleaner::MasterCleaner.database_cleaner.clean
           end
 
           case pseudo_cleaner_data[:test_strategy]
@@ -114,7 +110,7 @@ module PseudoCleaner
       end
 
       def reset_database
-        DatabaseCleaner.clean_with(:truncation)
+        PseudoCleaner::MasterCleaner.database_cleaner.clean_with(:truncation)
 
         PseudoCleaner::MasterCleaner.database_reset
       end
@@ -358,15 +354,17 @@ module PseudoCleaner
     def run_all_cleaners(cleaner_function, cleaners, *args, &block)
       last_error = nil
 
-      cleaners.each do |cleaner|
-        begin
-          if cleaner.respond_to?(cleaner_function)
-            cleaner.send(cleaner_function, *args, &block)
-          end
-        rescue => error
-          PseudoCleaner::MasterCleaner.process_exception(last_error) if last_error
+      if cleaners
+        cleaners.each do |cleaner|
+          begin
+            if cleaner.respond_to?(cleaner_function)
+              cleaner.send(cleaner_function, *args, &block)
+            end
+          rescue => error
+            PseudoCleaner::MasterCleaner.process_exception(last_error) if last_error
 
-          last_error = error
+            last_error = error
+          end
         end
       end
 

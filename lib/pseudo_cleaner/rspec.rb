@@ -15,9 +15,23 @@ RSpec.configure do |config|
     PseudoCleaner::MasterCleaner.end_suite
   end
 
-  config.around(:each) do |example|
+  # I tried making this a config.around(:each).
+  # You can't do that.  It turns out that RSpec injects a virtual around(:each) that
+  # calls after_teardown which calls ActiveRecord::Base.clear_active_connections!
+  #
+  # This resets the active connection.
+  #
+  # If (for whatever reason) there are multiple connections in the connection pool this
+  # means that when you go to clean, the connection has been released, and when
+  # DatabaseCleaner tries to get a new connection, it may not get the same one it had
+  # when start was called.
+  #
+  # By using before and after, we avoid this problem by being inside the around block.
+  # The compromize is that the user will be more load dependent to get the hooks
+  # in the right order (potentially).
+  config.before(:each) do |example|
+    test_example = example
     test_example = example.example if example.respond_to?(:example)
-    test_example ||= self.example if self.respond_to?(:example)
 
     new_strategy = nil
 
@@ -34,11 +48,12 @@ RSpec.configure do |config|
     new_strategy ||= :transaction
 
     PseudoCleaner::MasterCleaner.start_example(test_example, new_strategy)
+  end
 
-    begin
-      example.run
-    ensure
-      PseudoCleaner::MasterCleaner.end_example(test_example)
-    end
+  config.after(:each) do |example|
+    test_example = example
+    test_example = example.example if example.respond_to?(:example)
+
+    PseudoCleaner::MasterCleaner.end_example(test_example)
   end
 end

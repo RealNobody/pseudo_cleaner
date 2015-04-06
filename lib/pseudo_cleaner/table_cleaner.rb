@@ -190,14 +190,14 @@ module PseudoCleaner
     end
 
     def test_end test_strategy
-      reset_table test_strategy
+      reset_table test_strategy, false
     end
 
     def suite_end test_strategy
-      reset_table test_strategy
+      reset_table test_strategy, true
     end
 
-    def reset_table test_strategy
+    def reset_table test_strategy, require_output
       if @test_strategy != test_strategy && !PseudoCleaner::Configuration.current_instance.single_cleaner_set
         if @options[:output_diagnostics]
           PseudoCleaner::Logger.write("  *** The ending strategy for \"#{initial_state[:table_name]}\" changed! ***".red.on_light_white)
@@ -216,19 +216,23 @@ module PseudoCleaner
         # I'm using it because it is faster than reseeding each test...
         # And, I can be responsible for worrying about referential integrity in the test
         # if I want to...
-        PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") if @options[:output_diagnostics]
+        pre_string    = "  Resetting table \"#{initial_state[:table_name]}\" for #{test_strategy}..."
+        pre_string    = "Tests ended without cleaning up properly!!!\n" + pre_string if require_output
+        pre_string    = pre_string.red.on_light_white if require_output
+
+        require_output ||= @options[:output_diagnostics]
 
         if initial_state[:table_is_active_record]
-          test_end_active_record test_strategy
+          test_end_active_record test_strategy, pre_string, require_output
         end
 
         if initial_state[:table_is_sequel_model]
-          test_end_sequel_model test_strategy
+          test_end_sequel_model test_strategy, pre_string, require_output
         end
       end
     end
 
-    def test_end_active_record test_strategy
+    def test_end_active_record test_strategy, pre_string, require_output
       initial_state = @@initial_states[@table]
       cleaned_table = false
 
@@ -243,7 +247,10 @@ module PseudoCleaner
         if num_deleted > 0
           cleaned_table = true
 
-          output_delete_record(test_strategy, "    Deleted #{num_deleted} records by ID.")
+          pre_string = output_delete_record(test_strategy,
+                                            "    Deleted #{num_deleted} records by ID.",
+                                            pre_string,
+                                            require_output)
         end
       end
 
@@ -255,7 +262,10 @@ module PseudoCleaner
         if num_deleted > 0
           cleaned_table = true
 
-          output_delete_record(test_strategy, "    Deleted #{num_deleted} records by #{initial_state[:created][:column_name]}.")
+          pre_string = output_delete_record(test_strategy,
+                                            "    Deleted #{num_deleted} records by #{initial_state[:created][:column_name]}.",
+                                            pre_string,
+                                            require_output)
         end
       end
 
@@ -263,14 +273,16 @@ module PseudoCleaner
         dirty_count = PseudoCleaner::Configuration.db_connection(:active_record).connection.
             execute("SELECT COUNT(*) FROM `#{table_name}` WHERE #{initial_state[:updated][:column_name]} > '#{initial_state[:updated][:value]}'").first[0]
 
-        if @options[:output_diagnostics] && dirty_count > 0
+        if require_output && dirty_count > 0
           # cleaned_table = true
 
           initial_state[:updated][:value] = PseudoCleaner::Configuration.db_connection(:active_record).connection.
               execute("SELECT MAX(#{initial_state[:updated][:column_name]}) FROM `#{table_name}`").first[0]
 
-          PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
-          output_delete_record(test_strategy, "    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
+          pre_string = output_delete_record(test_strategy,
+                                            "    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white,
+                                            pre_string,
+                                            require_output)
         end
       end
 
@@ -282,7 +294,12 @@ module PseudoCleaner
 
           DatabaseCleaner[:active_record, connection: PseudoCleaner::Configuration.db_connection(:active_record)].
               clean_with(:truncation, only: [initial_state[:table_name]])
-          output_delete_record(test_strategy, "    Deleted #{final_count} records by cleaning the table.") if final_count > 0
+          if final_count > 0
+            pre_string = output_delete_record(test_strategy,
+                                              "    Deleted #{final_count} records by cleaning the table.",
+                                              pre_string,
+                                              require_output)
+          end
 
           final_count = PseudoCleaner::Configuration.db_connection(:active_record).connection.
               execute("SELECT COUNT(*) FROM `#{table_name}`").first[0]
@@ -290,10 +307,10 @@ module PseudoCleaner
       end
 
       if initial_state[:count] != final_count
-        PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
-        output_delete_record(test_strategy,
-                             "    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white,
-                             true)
+        pre_string = output_delete_record(test_strategy,
+                                          "    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white,
+                                          pre_string,
+                                          true)
 
         initial_state[:count] = final_count
         cleaned_table         = true
@@ -304,7 +321,7 @@ module PseudoCleaner
       end
     end
 
-    def test_end_sequel_model test_strategy
+    def test_end_sequel_model test_strategy, pre_string, require_output
       initial_state = @@initial_states[@table]
       access_table  = sequel_model_table
       cleaned_table = false
@@ -316,7 +333,10 @@ module PseudoCleaner
           if num_deleted > 0
             cleaned_table = true
 
-            output_delete_record(test_strategy, "    Deleted #{num_deleted} records by ID.")
+            pre_string = output_delete_record(test_strategy,
+                                              "    Deleted #{num_deleted} records by ID.",
+                                              pre_string,
+                                              require_output)
           end
         end
 
@@ -328,7 +348,10 @@ module PseudoCleaner
           if num_deleted > 0
             cleaned_table = true
 
-            output_delete_record(test_strategy, "    Deleted #{num_deleted} records by #{initial_state[:created][:column_name]}.")
+            pre_string = output_delete_record(test_strategy,
+                                              "    Deleted #{num_deleted} records by #{initial_state[:created][:column_name]}.",
+                                              pre_string,
+                                              require_output)
           end
         end
 
@@ -338,13 +361,15 @@ module PseudoCleaner
               where("`#{initial_state[:updated][:column_name]}` > ?", initial_state[:updated][:value]).
               count
 
-          if @options[:output_diagnostics] && dirty_count > 0
+          if require_output && dirty_count > 0
             # cleaned_table = true
 
             initial_state[:updated][:value] = access_table.unfiltered.max(initial_state[:updated][:column_name])
 
-            PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
-            output_delete_record(test_strategy, "    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white)
+            pre_string = output_delete_record(test_strategy,
+                                              "    *** There are #{dirty_count} records which have been updated and may be dirty remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white,
+                                              pre_string,
+                                              require_output)
           end
         end
 
@@ -355,17 +380,22 @@ module PseudoCleaner
 
             DatabaseCleaner[:sequel, connection: PseudoCleaner::Configuration.db_connection(:sequel)].
                 clean_with(:truncation, only: [initial_state[:table_name]])
-            output_delete_record(test_strategy, "    Deleted #{final_count} records by cleaning the table.") if final_count > 0
+            if final_count > 0
+              pre_string = output_delete_record(test_strategy,
+                                                "    Deleted #{final_count} records by cleaning the table.",
+                                                pre_string,
+                                                require_output)
+            end
 
             final_count = access_table.unfiltered.count
           end
         end
 
         if initial_state[:count] != final_count
-          PseudoCleaner::Logger.write("  Resetting table \"#{initial_state[:table_name]}\"...") unless @options[:output_diagnostics]
-          output_delete_record(test_strategy,
-                               "    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white,
-                               true)
+          pre_string = output_delete_record(test_strategy,
+                                            "    *** There are #{final_count - initial_state[:count]} dirty records remaining after cleaning \"#{initial_state[:table_name]}\"... ***".red.on_light_white,
+                                            pre_string,
+                                            true)
 
           initial_state[:count] = final_count
           cleaned_table         = true
@@ -377,11 +407,14 @@ module PseudoCleaner
       end
     end
 
-    def output_delete_record(test_strategy, stats_string, require_output = false)
+    def output_delete_record(test_strategy, stats_string, pre_string, require_output = false)
+      PseudoCleaner::Logger.write(pre_string) if pre_string && (@options[:output_diagnostics] || require_output)
       if test_strategy == :transaction
         PseudoCleaner::Logger.write("    ***** TRANSACTION FAILED!!! *****".red.on_light_white)
       end
       PseudoCleaner::Logger.write(stats_string) if @options[:output_diagnostics] || require_output
+
+      nil
     end
 
     def reset_auto_increment test_start
@@ -489,12 +522,14 @@ module PseudoCleaner
     def review_rows(&block)
       initial_state = @@initial_states[@table]
 
-      if initial_state[:table_is_active_record]
-        review_rows_active_record &block
-      end
+      if initial_state
+        if initial_state[:table_is_active_record]
+          review_rows_active_record &block
+        end
 
-      if initial_state[:table_is_sequel_model]
-        review_rows_sequel_model &block
+        if initial_state[:table_is_sequel_model]
+          review_rows_sequel_model &block
+        end
       end
     end
 

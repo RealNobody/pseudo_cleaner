@@ -75,7 +75,7 @@ end
 #
 # I hope that this gets fixed, but until it does, we can't use Around for database cleaning.
 #
-# This is fixed in Cucumber 2.0.
+# This was fixed in Cucumber 2.0.
 
 
 if Cucumber::VERSION.split[0].to_i >= 2

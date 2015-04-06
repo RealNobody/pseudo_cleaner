@@ -61,6 +61,9 @@ To integrate the PseudoCleaner with Rspec, simply add the following lines to `sp
     require 'pseudo_cleaner'
     require 'pseudo_cleaner/rspec'
 
+Add the lines as early as possible in the spec_helper because the hooks used are before and after hooks.  Adding the 
+hooks early will wrap other hooks in the transaction.
+
 All tests will now by default use DatabaseCleaner with the `:transaction` strategy.  For most tests, this will wrap
 the test in a transaction, and roll back the transaction at the end of the test.
 
@@ -85,7 +88,16 @@ Example:
 
 ### Cucumber
 
-Cucumber integration similar to Rspec integration is planned, but not implemented yet.
+Cucumber integration similar to Rspec integration simply add the cucumber hook file instead.
+
+    require 'pseudo_cleaner'
+    require 'pseudo_cleaner/cucumber'
+
+### Spinach
+
+Spinach integration hasn't been fully tested.
+
+It probably should work.
 
 ### Manual
 
