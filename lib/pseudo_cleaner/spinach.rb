@@ -16,21 +16,21 @@ Spinach.hooks.around_scenario do |scenario_data, step_definitions, &block|
     DatabaseCleaner.strategy = :transaction
   end
 
-  strategy = if scenario.tags.include?("@none")
+  strategy = if scenario_data.tags.include?("@none")
                :none
-             elsif scenario.tags.include?("@truncation")
+             elsif scenario_data.tags.include?("@truncation")
                :truncation
-             elsif scenario.tags.include?("@deletion")
+             elsif scenario_data.tags.include?("@deletion")
                :deletion
              else
                :pseudo_delete
              end
-  PseudoCleaner::MasterCleaner.start_example(scenario, strategy)
+  PseudoCleaner::MasterCleaner.start_example(scenario_data, strategy)
 
   begin
     block.call
   ensure
-    PseudoCleaner::MasterCleaner.end_example(scenario)
+    PseudoCleaner::MasterCleaner.end_example(scenario_data)
   end
 end
 
