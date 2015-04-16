@@ -2,7 +2,7 @@ first_test_run = false
 
 # I haven't tested this fully yet, but I think that this should work.
 
-Spinach.hooks.around_scenario do |scenario_data, step_definitions, &block|
+Spinach.hooks.before_scenario do |scenario, step_definitions|
   unless first_test_run
     first_test_run = true
     # before tests run...
@@ -16,22 +16,20 @@ Spinach.hooks.around_scenario do |scenario_data, step_definitions, &block|
     DatabaseCleaner.strategy = :transaction
   end
 
-  strategy = if scenario_data.tags.include?("@none")
+  strategy = if scenario.tags.include?("@none")
                :none
-             elsif scenario_data.tags.include?("@truncation")
+             elsif scenario.tags.include?("@truncation")
                :truncation
-             elsif scenario_data.tags.include?("@deletion")
+             elsif scenario.tags.include?("@deletion")
                :deletion
              else
                :pseudo_delete
              end
-  PseudoCleaner::MasterCleaner.start_example(scenario_data, strategy)
+  PseudoCleaner::MasterCleaner.start_example(scenario, strategy)
+end
 
-  begin
-    block.call
-  ensure
-    PseudoCleaner::MasterCleaner.end_example(scenario_data)
-  end
+Spinach.hooks.after_scenario do |scenario, step_definitions|
+  PseudoCleaner::MasterCleaner.end_example(scenario)
 end
 
 Spinach.hooks.after_run do |status|
