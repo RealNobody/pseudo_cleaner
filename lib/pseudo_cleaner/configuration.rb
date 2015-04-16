@@ -40,8 +40,8 @@ module PseudoCleaner
 
     def db_connection=(connection)
       if Object.const_defined?("ActiveRecord", false) && ActiveRecord.const_defined?("Base", false)
-        table_is_active_record = connection.class == ActiveRecord::Base
-        table_super_class      = connection.class.superclass if connection.class
+        table_is_active_record = connection == ActiveRecord::Base
+        table_super_class      = connection.superclass if connection
         while !table_is_active_record && table_super_class
           table_is_active_record = (table_super_class == ActiveRecord::Base)
           table_super_class      = table_super_class.superclass
