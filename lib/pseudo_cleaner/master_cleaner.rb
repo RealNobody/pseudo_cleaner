@@ -4,6 +4,7 @@ module PseudoCleaner
   class MasterCleaner
     @@suite_cleaner          = nil
     @@cleaner_classes        = nil
+    @@redis_classes          = nil
     @@cleaner_classes_sorted = false
 
     CLEANING_STRATEGIES            = [:transaction, :truncation, :deletion, :pseudo_delete, :none]
@@ -28,6 +29,11 @@ module PseudoCleaner
         @@suite_cleaner = PseudoCleaner::MasterCleaner.new(:suite)
         @@suite_cleaner.start :pseudo_delete
         @@suite_cleaner
+      end
+
+      def clean_redis(redis)
+        @@redis_classes ||= []
+        @@redis_classes << redis
       end
 
       def database_cleaner
@@ -189,6 +195,7 @@ module PseudoCleaner
 
           PseudoCleaner::MasterCleaner.create_table_cleaners
           PseudoCleaner::MasterCleaner.create_custom_cleaners
+          PseudoCleaner::MasterCleaner.create_redis_cleaners
         end
 
         @@cleaner_classes
@@ -245,6 +252,12 @@ module PseudoCleaner
         end
       end
 
+      def create_redis_cleaners
+        @@redis_classes.each do |redis|
+          PseudoCleaner::MasterCleaner.cleaner_classes << [redis, nil, PseudoCleaner::RedisCleaner]
+        end
+      end
+
       def find_file_class(seeder_file, seeder_root)
         check_class      = Object
         full_module_name = []
@@ -265,7 +278,7 @@ module PseudoCleaner
       end
 
       def review_rows(&block)
-        @@suite_cleaner.review_rows &block
+        @@suite_cleaner.review_rows(&block)
       end
     end
 
