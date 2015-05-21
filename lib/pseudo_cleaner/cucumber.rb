@@ -33,11 +33,20 @@ class CucumberHook
   end
 
   def start_test(scenario, strategy)
-    PseudoCleaner::MasterCleaner.start_example(scenario, strategy)
+    PseudoCleaner::MasterCleaner.start_example(scenario, strategy, "PseudoCleaner::start_test - #{report_name(scenario)}")
   end
 
   def end_test(scenario)
-    PseudoCleaner::MasterCleaner.end_example(scenario)
+    PseudoCleaner::MasterCleaner.end_example(scenario, "PseudoCleaner::end_test - #{report_name(scenario)}")
+  end
+
+  def report_name(scenario)
+    report_name = "Unknown"
+    if scenario.respond_to?(:feature)
+      report_name = "#{scenario.feature.title}:#{scenario.title}"
+    elsif scenario.respond_to?(:line)
+      report_name = "Line - #{scenario.line}"
+    end
   end
 
   def run_test(scenario, strategy, block)

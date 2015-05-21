@@ -22,13 +22,52 @@ module PseudoCleaner
     VALID_TEST_METHODS  = VALID_START_METHODS + VALID_END_METHODS
 
     class << self
-      def start_suite
-        if @@suite_cleaner
-          @@suite_cleaner.reset_suite
+      def report_table
+        @@report_table
+      end
+
+      def report_error
+        @@report_error = true
+      end
+
+      def within_report_block(description, &block)
+        @@report_error = false
+        @@report_table = nil
+
+        if Object.const_defined?("Cornucopia", false) &&
+            Cornucopia.const_defined?("Util", false) &&
+            Cornucopia::Util.const_defined?("ReportBuilder", false)
+          Cornucopia::Util::ReportBuilder.current_report.within_test(description) do
+            Cornucopia::Util::ReportBuilder.current_report.within_section(description) do |report|
+              report.within_table do |report_table|
+                @@report_table = report_table
+
+                block.yield
+              end
+            end
+
+            unless @@report_error
+              Cornucopia::Util::ReportBuilder.current_report.test_succeeded
+            end
+          end
+
+          @@report_table = nil
+        else
+          block.yield
         end
-        @@suite_cleaner = PseudoCleaner::MasterCleaner.new(:suite)
-        @@suite_cleaner.start :pseudo_delete
-        @@suite_cleaner
+      end
+
+      def start_suite(description = nil)
+        description ||= "PseudoCleaner::MasterCleaner.start_suite"
+
+        within_report_block(description) do
+          if @@suite_cleaner
+            @@suite_cleaner.reset_suite
+          end
+          @@suite_cleaner = PseudoCleaner::MasterCleaner.new(:suite)
+          @@suite_cleaner.start :pseudo_delete
+          @@suite_cleaner
+        end
       end
 
       def clean_redis(redis)
@@ -44,43 +83,55 @@ module PseudoCleaner
         end
       end
 
-      def start_example(example_class, strategy)
-        pseudo_cleaner_data                 = {}
-        pseudo_cleaner_data[:test_strategy] = strategy
+      def start_example(example_class, strategy, description = nil)
+        description ||= "PseudoCleaner::MasterCleaner.start_example"
 
-        unless strategy == :none
-          raise "invalid strategy" unless PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES.has_key? strategy
+        within_report_block(description) do
+          pseudo_cleaner_data                 = {}
+          pseudo_cleaner_data[:test_strategy] = strategy
 
-          DatabaseCleaner.strategy = PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES[strategy]
-          unless [:pseudo_delete].include? strategy
-            PseudoCleaner::MasterCleaner.database_cleaner.start
+          unless strategy == :none
+            raise "invalid strategy" unless PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES.has_key? strategy
+
+            DatabaseCleaner.strategy = PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES[strategy]
+            unless [:pseudo_delete].include? strategy
+              PseudoCleaner::MasterCleaner.database_cleaner.start
+            end
+
+            pseudo_cleaner_data[:pseudo_state] = PseudoCleaner::MasterCleaner.start_test strategy
           end
 
-          pseudo_cleaner_data[:pseudo_state] = PseudoCleaner::MasterCleaner.start_test strategy
-        end
-
-        example_class.instance_variable_set(:@pseudo_cleaner_data, pseudo_cleaner_data)
-      end
-
-      def end_example(example_class)
-        pseudo_cleaner_data = example_class.instance_variable_get(:@pseudo_cleaner_data)
-
-        unless pseudo_cleaner_data[:test_strategy] == :none
-          unless [:pseudo_delete].include? pseudo_cleaner_data[:test_strategy]
-            PseudoCleaner::MasterCleaner.database_cleaner.clean
-          end
-
-          case pseudo_cleaner_data[:test_strategy]
-            when :deletion, :truncation
-              PseudoCleaner::MasterCleaner.database_reset
-          end
-
-          pseudo_cleaner_data[:pseudo_state].end test_type: :test, test_strategy: pseudo_cleaner_data[:test_strategy]
+          example_class.instance_variable_set(:@pseudo_cleaner_data, pseudo_cleaner_data)
         end
       end
 
-      def end_suite
-        @@suite_cleaner.end test_strategy: :pseudo_delete if @@suite_cleaner
+      def end_example(example_class, description = nil)
+        description ||= "PseudoCleaner::MasterCleaner.end_example"
+
+        within_report_block(description) do
+          pseudo_cleaner_data = example_class.instance_variable_get(:@pseudo_cleaner_data)
+
+          unless pseudo_cleaner_data[:test_strategy] == :none
+            unless [:pseudo_delete].include? pseudo_cleaner_data[:test_strategy]
+              PseudoCleaner::MasterCleaner.database_cleaner.clean
+            end
+
+            case pseudo_cleaner_data[:test_strategy]
+              when :deletion, :truncation
+                PseudoCleaner::MasterCleaner.database_reset
+            end
+
+            pseudo_cleaner_data[:pseudo_state].end test_type: :test, test_strategy: pseudo_cleaner_data[:test_strategy]
+          end
+        end
+      end
+
+      def end_suite(description = nil)
+        description ||= "PseudoCleaner::MasterCleaner.end_suite"
+
+        within_report_block(description) do
+          @@suite_cleaner.end test_strategy: :pseudo_delete if @@suite_cleaner
+        end
       end
 
       def start_test test_strategy
@@ -115,10 +166,14 @@ module PseudoCleaner
         raise body_error if body_error
       end
 
-      def reset_database
-        PseudoCleaner::MasterCleaner.database_cleaner.clean_with(:truncation)
+      def reset_database(description = nil)
+        description ||= "PseudoCleaner::MasterCleaner.reset_database"
 
-        PseudoCleaner::MasterCleaner.database_reset
+        within_report_block(description) do
+          PseudoCleaner::MasterCleaner.database_cleaner.clean_with(:truncation)
+
+          PseudoCleaner::MasterCleaner.database_reset
+        end
       end
 
       def database_reset
@@ -253,8 +308,10 @@ module PseudoCleaner
       end
 
       def create_redis_cleaners
-        @@redis_classes.each do |redis|
-          PseudoCleaner::MasterCleaner.cleaner_classes << [redis, nil, PseudoCleaner::RedisCleaner]
+        if @@redis_classes
+          @@redis_classes.each do |redis|
+            PseudoCleaner::MasterCleaner.cleaner_classes << [redis, nil, PseudoCleaner::RedisCleaner]
+          end
         end
       end
 

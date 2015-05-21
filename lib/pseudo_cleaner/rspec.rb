@@ -47,13 +47,15 @@ RSpec.configure do |config|
     end
     new_strategy ||= :transaction
 
-    PseudoCleaner::MasterCleaner.start_example(test_example, new_strategy)
+    report_name = test_example.full_description
+    PseudoCleaner::MasterCleaner.start_example(test_example, new_strategy, "PseudoCleaner::start_test - #{report_name}")
   end
 
   config.after(:each) do |example|
     test_example = example
     test_example = example.example if example.respond_to?(:example)
 
-    PseudoCleaner::MasterCleaner.end_example(test_example)
+    report_name = test_example.full_description
+    PseudoCleaner::MasterCleaner.end_example(test_example, "PseudoCleaner::end_test - #{report_name}")
   end
 end

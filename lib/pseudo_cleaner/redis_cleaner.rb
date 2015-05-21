@@ -174,9 +174,7 @@ module PseudoCleaner
       attr_reader :cur_pos
 
       def initialize(message_string)
-        @message        = message_string
-        @initial_keys   = SortedSet.new
-        @monitor_thread = nil
+        @message = message_string
 
         parse_message
       end
@@ -315,6 +313,11 @@ module PseudoCleaner
     end
 
     def initialize(start_method, end_method, table, options)
+      @initial_keys       = SortedSet.new
+      @monitor_thread     = nil
+      @redis_name         = nil
+      @suite_altered_keys = SortedSet.new
+
       unless PseudoCleaner::MasterCleaner::VALID_START_METHODS.include?(start_method)
         raise "You must specify a valid start function from: #{PseudoCleaner::MasterCleaner::VALID_START_METHODS}."
       end
@@ -384,9 +387,14 @@ module PseudoCleaner
         if updated_values && !updated_values.empty?
           report_keys = []
 
+          if @options[:output_diagnostics]
+            report_dirty_values "updated values", updated_values
+          end
+
           updated_values.each do |value|
             if initial_keys.include?(value)
               report_keys << value
+              @suite_altered_keys << value
             else
               redis.del(value)
             end
@@ -399,6 +407,11 @@ module PseudoCleaner
 
     def suite_end test_strategy
       report_end_of_suite_state "suite end"
+
+      if monitor_thread
+        monitor_thread.kill
+        @monitor_thread = nil
+      end
     end
 
     def reset_suite
@@ -411,13 +424,20 @@ module PseudoCleaner
       end
     end
 
+    def redis_name
+      unless @redis_name
+        redis_options = redis.client.options.with_indifferent_access
+        @redis_name   = "#{redis_options[:host]}:#{redis_options[:port]}/#{redis_options[:db]}"
+      end
+
+      @redis_name
+    end
+
     def review_rows(&block)
       synchronize_test_values do |updated_values|
         if updated_values && !updated_values.empty?
-          redis_options    = monitor_redis.client.options.with_indifferent_access
-          redis_connection = "#{redis_options[:host]}:#{redis_options[:port]}/#{redis_options[:db]}"
           updated_values.each do |updated_value|
-            block.yield redis_connection, report_record(updated_value)
+            block.yield redis_name, report_record(updated_value)
           end
         end
       end
@@ -432,21 +452,22 @@ module PseudoCleaner
     end
 
     def report_end_of_suite_state report_reason
-      synchronize_test_values do |test_values|
-        current_keys = SortedSet.new(redis.keys)
+      current_keys = SortedSet.new(redis.keys)
 
-        deleted_keys = initial_keys - current_keys
-        new_keys     = current_keys - initial_keys
+      deleted_keys = initial_keys - current_keys
+      new_keys     = current_keys - initial_keys
 
-        # filter out values we inserted that will go away on their own.
-        new_keys     = new_keys.select { |key| (key =~ /redis_cleaner::synchronization_(?:end_)?key_[0-9]+_[0-9]+/).nil? }
+      # filter out values we inserted that will go away on their own.
+      new_keys     = new_keys.select { |key| (key =~ /redis_cleaner::synchronization_(?:end_)?key_[0-9]+_[0-9]+/).nil? }
 
-        report_dirty_values "new values as of #{report_reason}", new_keys
-        report_dirty_values "values deleted before #{report_reason}", deleted_keys
+      report_dirty_values "new values as of #{report_reason}", new_keys
+      report_dirty_values "values deleted before #{report_reason}", deleted_keys
+      report_dirty_values "initial values changed during suite run", @suite_altered_keys
 
-        new_keys.each do |key_value|
-          redis.del key_value
-        end
+      @suite_altered_keys = SortedSet.new
+
+      new_keys.each do |key_value|
+        redis.del key_value
       end
     end
 
@@ -475,6 +496,18 @@ module PseudoCleaner
       # @initial_keys.each do |key_value|
       #   redis.sadd(PseudoCleaner::RedisCleaner::SUITE_KEY, key_value)
       # end
+      if @options[:output_diagnostics]
+        if PseudoCleaner::MasterCleaner.report_table
+          Cornucopia::Util::ReportTable.new(nested_table:         PseudoCleaner::MasterCleaner.report_table,
+                                            nested_table_label:   redis_name,
+                                            suppress_blank_table: true) do |report_table|
+            report_table.write_stats "initial keys count", @initial_keys.count
+          end
+        else
+          puts("#{redis_name}")
+          puts("    Initial keys count - #{@initial_keys.count}")
+        end
+      end
 
       unless @monitor_thread
         @monitor_thread = Thread.new do
@@ -486,12 +519,11 @@ module PseudoCleaner
           cleaner_class_db = redis_options[:db]
 
           monitor_redis.monitor do |message|
-            # puts("*** received a message (#{message.class})")
-            # puts(message)
+            # if @options[:output_diagnostics]
+            #   puts("*** received a message (#{message.class}) - #{message}")
+            # end
 
             redis_message = RedisMessage.new message
-            # puts(redis_message)
-            # puts(redis_message.keys)
 
             if redis_message.db == cleaner_class_db
               process_command = true
@@ -563,18 +595,16 @@ module PseudoCleaner
     end
 
     def report_dirty_values message, test_values
-      # redis_connection = "#{redis.client.options["host"]}:#{redis.client.options["port"]}/#{redis.client.options["db"]}"
       if test_values && !test_values.empty?
-        if Object.const_defined?("Cornucopia", false) &&
-            Cornucopia.const_defined?("Util", false) &&
-            Cornucopia::Util.const_defined?("ReportBuilder", false)
-          Cornucopia::Util::ReportBuilder.current_report.within_test("RedisCleaner - #{message}") do
-            Cornucopia::Util::ReportBuilder.current_report.within_section("RedisCleaner - #{message}") do |report|
-              report.within_table do |report_table|
-                test_values.each_with_index do |key_name, index|
-                  report_table.write_stats index, report_record(key_name)
-                end
-              end
+        PseudoCleaner::MasterCleaner.report_error
+
+        if PseudoCleaner::MasterCleaner.report_table
+          Cornucopia::Util::ReportTable.new(nested_table:         PseudoCleaner::MasterCleaner.report_table,
+                                            nested_table_label:   redis_name,
+                                            suppress_blank_table: true) do |report_table|
+            report_table.write_stats "action", message
+            test_values.each_with_index do |key_name, index|
+              report_table.write_stats index, report_record(key_name)
             end
           end
         else
