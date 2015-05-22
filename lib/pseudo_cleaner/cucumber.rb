@@ -58,6 +58,14 @@ class CucumberHook
       end_test(scenario)
     end
   end
+
+  def peek_data_inline(scenario)
+    PseudoCleaner::MasterCleaner.peek_data_inline("PseudoCleaner::peek_data - #{report_name(scenario)}")
+  end
+
+  def peek_data_new_test(scenario)
+    PseudoCleaner::MasterCleaner.peek_data_new_test("PseudoCleaner::peek_data - #{report_name(scenario)}")
+  end
 end
 
 ##
@@ -122,6 +130,32 @@ else
 
   After do |scenario|
     CucumberHook.instance.end_test(scenario)
+  end
+end
+
+After("~@full_data_dump") do |scenario|
+  if scenario.failed?
+    if PseudoCleaner::Configuration.instance.peek_data_on_error
+      CucumberHook.instance.peek_data_inline(scenario)
+    end
+  else
+    if PseudoCleaner::Configuration.instance.peek_data_not_on_error
+      CucumberHook.instance.peek_data_new_test(scenario)
+    end
+  end
+end
+
+After("@full_data_dump") do |scenario|
+  if scenario.failed?
+    if PseudoCleaner::Configuration.instance.enable_full_data_dump_tag ||
+        PseudoCleaner::Configuration.instance.peek_data_on_error
+      CucumberHook.instance.peek_data_inline(scenario)
+    end
+  else
+    if PseudoCleaner::Configuration.instance.enable_full_data_dump_tag ||
+        PseudoCleaner::Configuration.instance.peek_data_not_on_error
+      CucumberHook.instance.peek_data_new_test(scenario)
+    end
   end
 end
 

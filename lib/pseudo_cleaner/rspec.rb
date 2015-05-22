@@ -56,6 +56,31 @@ RSpec.configure do |config|
     test_example = example.example if example.respond_to?(:example)
 
     report_name = test_example.full_description
+
+    if test_example.metadata[:full_data_dump]
+      if (test_example.exception)
+        if PseudoCleaner::Configuration.instance.enable_full_data_dump_tag ||
+            PseudoCleaner::Configuration.instance.peek_data_on_error
+          PseudoCleaner::MasterCleaner.peek_data_inline("PseudoCleaner::peek_data - #{report_name}")
+        end
+      else
+        if PseudoCleaner::Configuration.instance.enable_full_data_dump_tag ||
+            PseudoCleaner::Configuration.instance.peek_data_not_on_error
+          PseudoCleaner::MasterCleaner.peek_data_new_test("PseudoCleaner::peek_data - #{report_name}")
+        end
+      end
+    else
+      if (test_example.exception)
+        if PseudoCleaner::Configuration.instance.peek_data_on_error
+          PseudoCleaner::MasterCleaner.peek_data_inline("PseudoCleaner::peek_data - #{report_name}")
+        end
+      else
+        if PseudoCleaner::Configuration.instance.peek_data_not_on_error
+          PseudoCleaner::MasterCleaner.peek_data_new_test("PseudoCleaner::peek_data - #{report_name}")
+        end
+      end
+    end
+
     PseudoCleaner::MasterCleaner.end_example(test_example, "PseudoCleaner::end_test - #{report_name}")
   end
 end

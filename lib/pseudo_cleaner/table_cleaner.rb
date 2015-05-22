@@ -81,7 +81,7 @@ module PseudoCleaner
     def within_report_block(description, conditional, &block)
       @report_table = nil
 
-      if PseudoCleaner::MasterCleaner.report_table && conditional
+      if PseudoCleaner::MasterCleaner.report_table || conditional
         Cornucopia::Util::ReportTable.new(nested_table:         PseudoCleaner::MasterCleaner.report_table,
                                           nested_table_label:   description,
                                           suppress_blank_table: true) do |sub_report|
@@ -169,12 +169,13 @@ module PseudoCleaner
 
           if PseudoCleaner::Configuration.db_connection(:active_record).connection.
               columns(table_name).find { |column| column.name == date_column_name }
-            new_state[date_name] = {
+            new_state[date_name]                 = {
                 column_name: date_column_name,
                 value:       PseudoCleaner::Configuration.db_connection(:active_record).connection.
                     execute("SELECT MAX(`#{date_column_name}`) FROM `#{table_name}`").first[0] ||
                                  Time.now - 1.second
             }
+            new_state[date_name][:initial_value] = new_state[date_name][:value]
             if @options[:output_diagnostics]
               if @report_table
                 @report_table.write("max(#{new_state[date_name][:column_name]})", new_state[date_name][:value])
@@ -215,10 +216,11 @@ module PseudoCleaner
           date_column_name = "#{date_name}_#{verb_name}".to_sym
 
           if access_table.columns.include?(date_column_name)
-            new_state[date_name] = {
+            new_state[date_name]                 = {
                 column_name: date_column_name,
                 value:       access_table.unfiltered.max(date_column_name) || Time.now - 1.second
             }
+            new_state[date_name][:initial_value] = new_state[date_name][:value]
             if @options[:output_diagnostics]
               if @report_table
                 @report_table.write_stats("max(#{new_state[date_name][:column_name]})", new_state[date_name][:value])
@@ -242,7 +244,7 @@ module PseudoCleaner
       initial_state = @@initial_states[@table]
 
       within_report_block(initial_state[:table_name], @options[:output_diagnostics]) do
-        reset_table test_strategy, false
+        reset_table test_strategy, false, false
       end
     end
 
@@ -250,11 +252,11 @@ module PseudoCleaner
       initial_state = @@initial_states[@table]
 
       within_report_block(initial_state[:table_name], @options[:output_diagnostics]) do
-        reset_table test_strategy, true
+        reset_table test_strategy, true, true
       end
     end
 
-    def reset_table test_strategy, require_output
+    def reset_table test_strategy, require_output, is_suite_end
       initial_state = @@initial_states[@table]
 
       if @test_strategy != test_strategy && !PseudoCleaner::Configuration.current_instance.single_cleaner_set
@@ -286,16 +288,16 @@ module PseudoCleaner
         require_output ||= @options[:output_diagnostics]
 
         if initial_state[:table_is_active_record]
-          test_end_active_record test_strategy, pre_string, require_output
+          test_end_active_record test_strategy, pre_string, require_output, is_suite_end
         end
 
         if initial_state[:table_is_sequel_model]
-          test_end_sequel_model test_strategy, pre_string, require_output
+          test_end_sequel_model test_strategy, pre_string, require_output, is_suite_end
         end
       end
     end
 
-    def test_end_active_record test_strategy, pre_string, require_output
+    def test_end_active_record test_strategy, pre_string, require_output, is_suite_end
       initial_state = @@initial_states[@table]
       cleaned_table = false
 
@@ -336,11 +338,16 @@ module PseudoCleaner
         end
       end
 
-      if initial_state[:updated]
-        dirty_count = PseudoCleaner::Configuration.db_connection(:active_record).connection.
-            execute("SELECT COUNT(*) FROM `#{table_name}` WHERE #{initial_state[:updated][:column_name]} > '#{initial_state[:updated][:value]}'").first[0]
+      if initial_state[:updated] && !ignore_updates
+        test_value = initial_state[:updated][:value]
+        if is_suite_end
+          test_value = initial_state[:updated][:initial_value]
+        end
 
-        if require_output && dirty_count > 0
+        dirty_count = PseudoCleaner::Configuration.db_connection(:active_record).connection.
+            execute("SELECT COUNT(*) FROM `#{table_name}` WHERE #{initial_state[:updated][:column_name]} > '#{test_value}'").first[0]
+
+        if dirty_count > 0
           # cleaned_table = true
 
           initial_state[:updated][:value] = PseudoCleaner::Configuration.db_connection(:active_record).connection.
@@ -394,7 +401,11 @@ module PseudoCleaner
       end
     end
 
-    def test_end_sequel_model test_strategy, pre_string, require_output
+    def ignore_updates
+      false
+    end
+
+    def test_end_sequel_model test_strategy, pre_string, require_output, is_suite_end
       initial_state = @@initial_states[@table]
       access_table  = sequel_model_table
       cleaned_table = false
@@ -432,13 +443,18 @@ module PseudoCleaner
           end
         end
 
-        if initial_state[:updated]
+        if initial_state[:updated] && !ignore_updates
+          test_value = initial_state[:updated][:value]
+          if is_suite_end
+            test_value = initial_state[:updated][:initial_value]
+          end
+
           dirty_count = access_table.
               unfiltered.
-              where("`#{initial_state[:updated][:column_name]}` > ?", initial_state[:updated][:value]).
+              where("`#{initial_state[:updated][:column_name]}` > ?", test_value).
               count
 
-          if require_output && dirty_count > 0
+          if dirty_count > 0
             # cleaned_table = true
 
             initial_state[:updated][:value] = access_table.unfiltered.max(initial_state[:updated][:column_name])
@@ -685,7 +701,7 @@ module PseudoCleaner
       elsif initial_state[:updated]
         dataset = sequel_model_table.
             unfiltered.
-            where("`#{initial_state[:updated][:column_name]}` > ?", initial_state[:created][:value])
+            where("`#{initial_state[:updated][:column_name]}` > ?", initial_state[:updated][:value])
       elsif initial_state[:count]
         dataset = sequel_model_table.unfiltered.limit(99, initial_state[:count])
       end
@@ -694,6 +710,38 @@ module PseudoCleaner
         dataset.each do |row|
           block.yield sequel_model_table_name.gsub(/`([^`]+)`/, "\\1"), row
         end
+      end
+    end
+
+    def peek_values
+      row_data  = []
+      peek_name = nil
+
+      review_rows do |table_name, table_values|
+        peek_name = table_name
+        row_data << table_values
+      end
+
+      if row_data && !row_data.empty?
+        output_values = false
+
+        if PseudoCleaner::MasterCleaner.report_table
+          Cornucopia::Util::ReportTable.new(nested_table:         PseudoCleaner::MasterCleaner.report_table,
+                                            nested_table_label:   peek_name,
+                                            suppress_blank_table: true) do |report_table|
+            row_data.each_with_index do |row, row_index|
+              report_table.write_stats row_index.to_s, row
+            end
+          end
+        else
+          PseudoCleaner::Logger.write("  #{peek_name}")
+
+          row_data.each do |updated_value|
+            PseudoCleaner::Logger.write("    #{updated_value}")
+          end
+        end
+
+        PseudoCleaner::MasterCleaner.report_error
       end
     end
   end

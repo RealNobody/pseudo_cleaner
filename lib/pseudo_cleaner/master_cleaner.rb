@@ -6,6 +6,8 @@ module PseudoCleaner
     @@cleaner_classes        = nil
     @@redis_classes          = nil
     @@cleaner_classes_sorted = false
+    @@report_table           = nil
+    @@report_error           = false
 
     CLEANING_STRATEGIES            = [:transaction, :truncation, :deletion, :pseudo_delete, :none]
     DB_CLEANER_CLEANING_STRATEGIES =
@@ -337,6 +339,45 @@ module PseudoCleaner
       def review_rows(&block)
         @@suite_cleaner.review_rows(&block)
       end
+
+      def peek_data_inline(description = nil)
+        @@report_error = false
+        @@report_table = nil
+
+        if Object.const_defined?("Cornucopia", false) &&
+            Cornucopia.const_defined?("Util", false) &&
+            Cornucopia::Util.const_defined?("ReportBuilder", false)
+          Cornucopia::Util::ReportBuilder.current_report.within_section(description) do |report|
+            report.within_hidden_table do |outer_report_table|
+              Cornucopia::Util::ReportTable.new(
+                  nested_table:         outer_report_table,
+                  suppress_blank_table: true) do |report_table|
+                @@report_table = report_table
+
+                peek_values
+              end
+            end
+          end
+
+          @@report_table = nil
+        else
+          PseudoCleaner::Logger.write(description)
+
+          peek_values
+        end
+      end
+
+      def peek_data_new_test(description = nil)
+        description ||= "PseudoCleaner::MasterCleaner.peek_data"
+
+        within_report_block(description) do
+          peek_values
+        end
+      end
+
+      def peek_values
+        @@suite_cleaner.peek_values
+      end
     end
 
     def initialize(test_type)
@@ -443,6 +484,10 @@ module PseudoCleaner
 
     def review_rows(&block)
       run_all_cleaners(:review_rows, @cleaners, &block)
+    end
+
+    def peek_values
+      run_all_cleaners(:peek_values, @cleaners)
     end
   end
 end

@@ -51,7 +51,6 @@ RSpec.describe PseudoCleaner::RedisCleaner, type: :helper do
     redis.set(set_key, set_value)
     db2_redis.set(set_key_1, set_value_1)
 
-    expect(Object).to receive(:const_defined?).with("Cornucopia", false).and_return(false)
     expect(PseudoCleaner::Logger).to receive(:write).exactly(2).times.and_call_original
 
     cleaner.test_start :pseudo_delete
@@ -99,8 +98,7 @@ RSpec.describe PseudoCleaner::RedisCleaner, type: :helper do
     redis.set(set_key, set_value)
     db2_redis.set(set_key_1, set_value_1)
 
-    expect(Object).to receive(:const_defined?).with("Cornucopia", false).and_return(false)
-    expect(PseudoCleaner::Logger).to receive(:write).exactly(2).times.and_call_original
+    expect(PseudoCleaner::Logger).to receive(:write).exactly(4).times.and_call_original
 
     cleaner.test_end :pseudo_delete
 
@@ -123,7 +121,6 @@ RSpec.describe PseudoCleaner::RedisCleaner, type: :helper do
     redis.set(set_key, set_value)
     db2_redis.set(set_key_1, set_value_1)
 
-    expect(Object).to receive(:const_defined?).with("Cornucopia", false).and_return(false)
     expect(PseudoCleaner::Logger).to receive(:write).exactly(2).times.and_call_original
 
     cleaner.test_end :pseudo_delete
@@ -132,8 +129,7 @@ RSpec.describe PseudoCleaner::RedisCleaner, type: :helper do
     expect(redis.get(set_key_1)).not_to be
     expect(db2_redis.get(set_key_1)).to eq set_value_1
 
-    expect(Object).to receive(:const_defined?).with("Cornucopia", false).and_return(false)
-    expect(PseudoCleaner::Logger).to receive(:write).exactly(2).times.and_call_original
+    expect(PseudoCleaner::Logger).to receive(:write).exactly(4).times.and_call_original
 
     cleaner.suite_end :pseudo_delete
   end
@@ -157,7 +153,6 @@ RSpec.describe PseudoCleaner::RedisCleaner, type: :helper do
 
     redis.set(set_key, set_value)
 
-    expect(Object).to receive(:const_defined?).with("Cornucopia", false).and_return(false)
     expect(PseudoCleaner::Logger).to receive(:write).exactly(2).times.and_call_original
 
     cleaner.suite_end :pseudo_delete

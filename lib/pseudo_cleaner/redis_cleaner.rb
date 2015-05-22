@@ -424,6 +424,14 @@ module PseudoCleaner
       end
     end
 
+    def ignore_regexes
+      []
+    end
+
+    def ignore_key(key)
+      ignore_regexes.detect { |ignore_regex| key =~ ignore_regex }
+    end
+
     def redis_name
       unless @redis_name
         redis_options = redis.client.options.with_indifferent_access
@@ -437,8 +445,42 @@ module PseudoCleaner
       synchronize_test_values do |updated_values|
         if updated_values && !updated_values.empty?
           updated_values.each do |updated_value|
-            block.yield redis_name, report_record(updated_value)
+            unless ignore_key(updated_value)
+              block.yield redis_name, report_record(updated_value)
+            end
           end
+        end
+      end
+    end
+
+    def peek_values
+      synchronize_test_values do |updated_values|
+        if updated_values && !updated_values.empty?
+          output_values = false
+
+          if PseudoCleaner::MasterCleaner.report_table
+            Cornucopia::Util::ReportTable.new(nested_table:         PseudoCleaner::MasterCleaner.report_table,
+                                              nested_table_label:   redis_name,
+                                              suppress_blank_table: true) do |report_table|
+              updated_values.each do |updated_value|
+                unless ignore_key(updated_value)
+                  output_values = true
+                  report_table.write_stats updated_value, report_record(updated_value)
+                end
+              end
+            end
+          else
+            PseudoCleaner::Logger.write("  #{redis_name}")
+
+            updated_values.each do |updated_value|
+              unless ignore_key(updated_value)
+                output_values = true
+                PseudoCleaner::Logger.write("    #{updated_value}: #{report_record(updated_value)}")
+              end
+            end
+          end
+
+          PseudoCleaner::MasterCleaner.report_error if output_values
         end
       end
     end
@@ -504,8 +546,8 @@ module PseudoCleaner
             report_table.write_stats "initial keys count", @initial_keys.count
           end
         else
-          puts("#{redis_name}")
-          puts("    Initial keys count - #{@initial_keys.count}")
+          PseudoCleaner::Logger.write("#{redis_name}")
+          PseudoCleaner::Logger.write("    Initial keys count - #{@initial_keys.count}")
         end
       end
 
@@ -519,10 +561,6 @@ module PseudoCleaner
           cleaner_class_db = redis_options[:db]
 
           monitor_redis.monitor do |message|
-            # if @options[:output_diagnostics]
-            #   puts("*** received a message (#{message.class}) - #{message}")
-            # end
-
             redis_message = RedisMessage.new message
 
             if redis_message.db == cleaner_class_db
@@ -569,8 +607,8 @@ module PseudoCleaner
     end
 
     def report_record(key_name)
-      key_hash = { key: key_name, ttl: redis.ttl(key_name) }
-      case redis.type(key_name)
+      key_hash = { key: key_name, type: redis.type(key_name), ttl: redis.ttl(key_name) }
+      case key_hash[:type]
         when "string"
           key_hash[:value] = redis.get(key_name)
         when "list"
@@ -596,7 +634,7 @@ module PseudoCleaner
 
     def report_dirty_values message, test_values
       if test_values && !test_values.empty?
-        PseudoCleaner::MasterCleaner.report_error
+        output_values = false
 
         if PseudoCleaner::MasterCleaner.report_table
           Cornucopia::Util::ReportTable.new(nested_table:         PseudoCleaner::MasterCleaner.report_table,
@@ -604,15 +642,23 @@ module PseudoCleaner
                                             suppress_blank_table: true) do |report_table|
             report_table.write_stats "action", message
             test_values.each_with_index do |key_name, index|
-              report_table.write_stats index, report_record(key_name)
+              unless ignore_key(key_name)
+                output_values = true
+                report_table.write_stats index, report_record(key_name)
+              end
             end
           end
         else
           PseudoCleaner::Logger.write("********* RedisCleaner - #{message}".red.on_light_white)
           test_values.each do |key_name|
-            PseudoCleaner::Logger.write("  #{report_record(key_name)}".red.on_light_white)
+            unless ignore_key(key_name)
+              output_values = true
+              PseudoCleaner::Logger.write("  #{key_name}: #{report_record(key_name)}".red.on_light_white)
+            end
           end
         end
+
+        PseudoCleaner::MasterCleaner.report_error if output_values
       end
     end
   end

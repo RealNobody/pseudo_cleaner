@@ -15,6 +15,9 @@ module PseudoCleaner
     attr_accessor :single_cleaner_set
     attr_accessor :post_transaction_analysis
     attr_accessor :db_connections
+    attr_accessor :peek_data_on_error
+    attr_accessor :peek_data_not_on_error
+    attr_accessor :enable_full_data_dump_tag
 
     def self.current_instance
       self.instance
@@ -27,6 +30,9 @@ module PseudoCleaner
       @single_cleaner_set          = true # true because I hope it will improve performance
       @post_transaction_analysis   = false # should only be set true if you are searching for a problem
       @db_connections              = {}
+      @peek_data_on_error          = true
+      @peek_data_not_on_error      = false
+      @enable_full_data_dump_tag   = true
     end
 
     # Backwards comaptibility...
