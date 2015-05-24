@@ -36,20 +36,13 @@ module PseudoCleaner
   # I'm not a huge fan of sleeps.  In the non-rails world, I used to be able to do a sleep(0) to signal the system to
   # check if somebody else needed to do some work.  Testing with Rails, I find I have to actually sleep, so I do a
   # very short time like 0.01.
-  class RedisCleaner
+  class RedisMonitorCleaner
+    # SUITE_KEY = "PseudoDelete::RedisMonitorCleaner:initial_redis_state"
+
     FLUSH_COMMANDS =
         [
             "flushall",
             "flushdb"
-        ]
-    SET_COMMANDS   =
-        [
-            "sadd",
-            "zadd",
-            "srem",
-            "zrem",
-            "zremrangebyrank",
-            "zremrangebyscore"
         ]
     WRITE_COMMANDS =
         [
@@ -97,6 +90,7 @@ module PseudoCleaner
             "rpoplpush",
             "rpush",
             "rpushx",
+            "sadd",
             "sdiffstore",
             "set",
             "setbit",
@@ -107,9 +101,14 @@ module PseudoCleaner
             "smove",
             "sort",
             "spop",
+            "srem",
             "sunionstore",
+            "zadd",
             "zincrby",
             "zinterstore",
+            "zrem",
+            "zremrangebyrank",
+            "zremrangebyscore",
         ]
     READ_COMMANDS  =
         [
@@ -161,19 +160,163 @@ module PseudoCleaner
             "zscore",
         ]
 
+    attr_reader :monitor_thread
     attr_reader :initial_keys
     attr_accessor :options
+
+    class RedisMessage
+      attr_reader :message
+      attr_reader :time_stamp
+      attr_reader :db
+      attr_reader :host
+      attr_reader :port
+      attr_reader :command
+      attr_reader :cur_pos
+
+      def initialize(message_string)
+        @message = message_string
+
+        parse_message
+      end
+
+      def parse_message
+        if @message =~ /[0-9]+\.[0-9]+ \[[0-9]+ [^:]+:[^\]]+\] \"[^\"]+\"/
+          end_pos     = @message.index(" ")
+          @time_stamp = @message[0..end_pos - 1]
+
+          @cur_pos = end_pos + 2 # " ["
+          end_pos  = @message.index(" ", @cur_pos)
+          @db      = @message[@cur_pos..end_pos - 1].to_i
+
+          @cur_pos = end_pos + 1
+          end_pos  = @message.index(":", @cur_pos)
+          @host    = @message[@cur_pos..end_pos - 1]
+
+          @cur_pos = end_pos + 1
+          end_pos  = @message.index("]", @cur_pos)
+          @port    = @message[@cur_pos..end_pos - 1].to_i
+
+          @cur_pos = end_pos + 2 # "] "
+          @command = next_value.downcase
+        else
+          @command = @message
+        end
+      end
+
+      def next_value
+        in_quote = (@message[@cur_pos] == '"')
+        if in_quote
+          @cur_pos += 1
+          end_pos  = @cur_pos
+          while (end_pos && end_pos < @message.length)
+            end_pos = @message.index("\"", end_pos)
+
+            num_backslashes = 0
+            back_pos        = end_pos
+
+            while @message[back_pos - 1] == "\\"
+              num_backslashes += 1
+              back_pos        -= 1
+            end
+
+            break if (num_backslashes % 2) == 0
+            end_pos += 1
+          end
+        else
+          end_pos = @message.index(" ", @cur_pos)
+        end
+        the_value = @message[@cur_pos..end_pos - 1]
+        end_pos   += 1 if in_quote
+
+        @cur_pos = end_pos + 1
+
+        the_value.gsub("\\\\", "\\").gsub("\\\"", "\"")
+      end
+
+      def keys
+        unless defined?(@message_keys)
+          @message_keys = []
+
+          if Redis::Namespace::COMMANDS.include? command
+            handling = Redis::Namespace::COMMANDS[command.to_s.downcase]
+
+            (before, after) = handling
+
+            case before
+              when :first
+                @message_keys << next_value
+
+              when :all
+                while @cur_pos < @message.length
+                  @message_keys << next_value
+                end
+
+              when :exclude_first
+                next_value
+                while @cur_pos < @message.length
+                  @message_keys << next_value
+                end
+
+              when :exclude_last
+                while @cur_pos < @message.length
+                  @message_keys << next_value
+                end
+                @message_keys.delete_at(@message_keys.length - 1)
+
+              when :exclude_options
+                options = ["weights", "aggregate", "sum", "min", "max"]
+                while @cur_pos < @message.length
+                  @message_keys << next_value
+                  if options.include?(@message_keys[-1].downcase)
+                    @message_keys.delete_at(@message_keys.length - 1)
+                    break
+                  end
+                end
+
+              when :alternate
+                while @cur_pos < @message.length
+                  @message_keys << next_value
+                  next_value
+                end
+
+              when :sort
+                next_value
+
+                while @cur_pos < @message.length
+                  a_value = next_value
+                  if a_value.downcase == "store"
+                    @message_keys[0] = next_value
+                  end
+                end
+
+              # when :eval_style
+              #
+              # when :scan_style
+            end
+          end
+        end
+
+        @message_keys
+      end
+
+      def to_s
+        {
+            time_stamp: time_stamp,
+            db:         db,
+            host:       host,
+            port:       port,
+            command:    command,
+            message:    message,
+            cur_pos:    cur_pos
+        }.to_s
+      end
+    end
 
     def initialize(start_method, end_method, table, options)
       @initial_keys       = SortedSet.new
       @monitor_thread     = nil
       @redis_name         = nil
       @suite_altered_keys = SortedSet.new
-      @updated_keys       = SortedSet.new
-      @multi_commands     = []
-      @in_multi           = false
-      @in_redis_cleanup   = false
-      @suspend_tracking   = false
 
       unless PseudoCleaner::MasterCleaner::VALID_START_METHODS.include?(start_method)
         raise "You must specify a valid start function from: #{PseudoCleaner::MasterCleaner::VALID_START_METHODS}."
@@ -192,141 +335,8 @@ module PseudoCleaner
       @redis = table
     end
 
-    # Ruby defines a now deprecated type method so we need to override it here
-    # since it will never hit method_missing
-    def type(key)
-      redis.type(key)
-    end
-
-    alias_method :self_respond_to?, :respond_to?
-
-    # emulate Ruby 1.9+ and keep respond_to_missing? logic together.
-    def respond_to?(command, include_private=false)
-      super or respond_to_missing?(command, include_private)
-    end
-
-    def updated_keys
-      @updated_keys ||= SortedSet.new
-    end
-
-    def method_missing(command, *args, &block)
-      normalized_command = command.to_s.downcase
-
-      if redis.respond_to?(normalized_command)
-        if normalized_command == "pipelined" ||
-            (normalized_command == "multi" && block)
-          @in_multi = true
-          normalized_command = "exec"
-        end
-
-        response = redis.send(command, *args, &block)
-
-        if @in_multi && !(["exec", "discard"].include?(normalized_command))
-          @multi_commands << [normalized_command, *args]
-        else
-          process_command(response, normalized_command, *args)
-        end
-
-        response
-      else
-        super
-      end
-    end
-
-    def process_command(response, *args)
-      unless @in_redis_cleanup || @suspend_tracking
-        if "multi" == args[0]
-          @in_multi       = true
-          @multi_commands = []
-        elsif ["exec", "pipelined"].include?(args[0])
-          begin
-            raise "exec response does not match sent commands" unless response.length == @multi_commands.length
-
-            response.each_with_index do |command_response, index|
-              process_command(command_response, *(@multi_commands[index]))
-            end
-          ensure
-            @in_multi       = false
-            @multi_commands = []
-          end
-        elsif "discard" == args[0]
-          @in_multi       = false
-          @multi_commands = []
-        elsif WRITE_COMMANDS.include?(args[0])
-          updated_keys.merge(extract_keys(*args))
-        elsif SET_COMMANDS.include?(args[0])
-          if [true, false].include?(response) ? response : (response > 0)
-            updated_keys.merge(extract_keys(*args))
-          end
-        end
-      end
-    end
-
-    def respond_to_missing?(command, include_all=false)
-      return true if WRITE_COMMANDS.include?(command.to_s.downcase)
-
-      # blind passthrough is deprecated and will be removed in 2.0
-      if redis.respond_to?(command, include_all)
-        return true
-      end
-
-      defined?(super) && super
-    end
-
-    def extract_keys(command, *args)
-      handling     = Redis::Namespace::COMMANDS[command.to_s.downcase]
-      message_keys = []
-
-      (before, after) = handling
-
-      case before
-        when :first
-          message_keys << args[0] if args[0]
-
-        when :all
-          args.each do |arg|
-            message_keys << arg
-          end
-
-        when :exclude_first
-          args.each do |arg|
-            message_keys << arg
-          end
-          message_keys.shift
-
-        when :exclude_last
-          args.each do |arg|
-            message_keys << arg
-          end
-          message_keys.pop unless message_keys.length == 1
-
-        when :exclude_options
-          args.each do |arg|
-            message_keys << arg unless arg.is_a?(Hash)
-          end
-
-        when :alternate
-          args.each_with_index do |arg, i|
-            message_keys << arg if i.even?
-          end
-
-        when :sort
-          if args[-1].is_a?(Hash)
-            if args[1][:store]
-              message_keys << args[1][:store]
-            end
-          end
-
-        # when :eval_style
-        #
-        # when :scan_style
-      end
-
-      message_keys
-    end
-
     def <=>(right_object)
-      if (right_object.is_a?(PseudoCleaner::RedisCleaner))
+      if (right_object.is_a?(PseudoCleaner::RedisMonitorCleaner))
         return 0
       elsif (right_object.is_a?(PseudoCleaner::TableCleaner))
         return 1
@@ -349,17 +359,13 @@ module PseudoCleaner
     def suite_start test_strategy
       @test_strategy ||= test_strategy
 
+      # if redis.type(PseudoCleaner::RedisMonitorCleaner::SUITE_KEY) == "set"
+      #   @initial_keys = SortedSet.new(redis.smembers(PseudoCleaner::RedisMonitorCleaner::SUITE_KEY))
+      #   report_end_of_suite_state "before suite start"
+      # end
+      # redis.del PseudoCleaner::RedisMonitorCleaner::SUITE_KEY
+
       start_monitor
-    end
-
-    def suspend_tracking(&block)
-      begin
-        @suspend_tracking = true
-
-        block.yield
-      ensure
-        @suspend_tracking = false
-      end
     end
 
     def test_start test_strategy
@@ -401,12 +407,21 @@ module PseudoCleaner
 
     def suite_end test_strategy
       report_end_of_suite_state "suite end"
+
+      if monitor_thread
+        monitor_thread.kill
+        @monitor_thread = nil
+      end
     end
 
     def reset_suite
       report_end_of_suite_state "reset suite"
 
-      start_monitor
+      if monitor_thread
+        monitor_thread.kill
+        @monitor_thread = nil
+        start_monitor
+      end
     end
 
     def ignore_regexes
@@ -470,6 +485,14 @@ module PseudoCleaner
       end
     end
 
+    def synchronize_key
+      @synchronize_key ||= "redis_cleaner::synchronization_key_#{rand(1..1_000_000_000_000_000_000)}_#{rand(1..1_000_000_000_000_000_000)}"
+    end
+
+    def synchronize_end_key
+      @synchronize_end_key ||= "redis_cleaner::synchronization_end_key_#{rand(1..1_000_000_000_000_000_000)}_#{rand(1..1_000_000_000_000_000_000)}"
+    end
+
     def report_end_of_suite_state report_reason
       current_keys = SortedSet.new(redis.keys)
 
@@ -491,24 +514,30 @@ module PseudoCleaner
     end
 
     def synchronize_test_values(&block)
-      updated_values = updated_keys.dup
+      updated_values = nil
 
-      @in_redis_cleanup = true
-
-      begin
-        block.yield updated_values
-      ensure
-        @in_redis_cleanup = false
+      if monitor_thread
+        redis.setex(synchronize_key, 1, true)
+        updated_values = queue.pop
       end
 
-      @updated_keys = SortedSet.new
+      block.yield updated_values
+
+      redis.setex(synchronize_end_key, 1, true)
+    end
+
+    def queue
+      @queue ||= Queue.new
     end
 
     def start_monitor
       cleaner_class = self
 
       @initial_keys = SortedSet.new(redis.keys)
-
+      # @initial_keys.add(PseudoCleaner::RedisMonitorCleaner::SUITE_KEY)
+      # @initial_keys.each do |key_value|
+      #   redis.sadd(PseudoCleaner::RedisMonitorCleaner::SUITE_KEY, key_value)
+      # end
       if @options[:output_diagnostics]
         if PseudoCleaner::MasterCleaner.report_table
           Cornucopia::Util::ReportTable.new(nested_table:         PseudoCleaner::MasterCleaner.report_table,
@@ -520,6 +549,60 @@ module PseudoCleaner
           PseudoCleaner::Logger.write("#{redis_name}")
           PseudoCleaner::Logger.write("    Initial keys count - #{@initial_keys.count}")
         end
+      end
+
+      unless @monitor_thread
+        @monitor_thread = Thread.new do
+          in_redis_cleanup = false
+          updated_keys     = SortedSet.new
+
+          monitor_redis    = Redis.new(cleaner_class.redis.client.options)
+          redis_options    = monitor_redis.client.options.with_indifferent_access
+          cleaner_class_db = redis_options[:db]
+
+          monitor_redis.monitor do |message|
+            redis_message = RedisMessage.new message
+
+            if redis_message.db == cleaner_class_db
+              process_command = true
+
+              if redis_message.command == "setex"
+                if redis_message.keys[0] == cleaner_class.synchronize_key
+                  process_command = false
+
+                  in_redis_cleanup = true
+                  return_values    = updated_keys
+                  updated_keys     = SortedSet.new
+                  cleaner_class.queue << return_values
+                elsif redis_message.keys[0] == cleaner_class.synchronize_end_key
+                  in_redis_cleanup                       = false
+                  cleaner_class.monitor_thread[:updated] = nil
+                  process_command                        = false
+                end
+              elsif redis_message.command == "del"
+                if in_redis_cleanup
+                  process_command = false
+                end
+              end
+
+              if process_command
+                # flush...
+                if PseudoCleaner::RedisMonitorCleaner::WRITE_COMMANDS.include? redis_message.command
+                  updated_keys.merge(redis_message.keys)
+                elsif PseudoCleaner::RedisMonitorCleaner::FLUSH_COMMANDS.include? redis_message.command
+                  # Not sure I can get the keys at this point...
+                  # updated_keys.merge(cleaner_class.redis.keys)
+                end
+              end
+            elsif "flushall" == redis_message.command
+              # Not sure I can get the keys at this point...
+              # updated_keys.merge(cleaner_class.redis.keys)
+            end
+          end
+        end
+
+        sleep(0.01)
+        redis.get(synchronize_key)
       end
     end
 
@@ -566,7 +649,7 @@ module PseudoCleaner
             end
           end
         else
-          PseudoCleaner::Logger.write("********* RedisCleaner - #{message}".red.on_light_white)
+          PseudoCleaner::Logger.write("********* RedisMonitorCleaner - #{message}".red.on_light_white)
           test_values.each do |key_name|
             unless ignore_key(key_name)
               output_values = true

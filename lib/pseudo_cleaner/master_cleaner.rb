@@ -4,7 +4,7 @@ module PseudoCleaner
   class MasterCleaner
     @@suite_cleaner          = nil
     @@cleaner_classes        = nil
-    @@redis_classes          = nil
+    # @@redis_classes          = nil
     @@cleaner_classes_sorted = false
     @@report_table           = nil
     @@report_error           = false
@@ -72,10 +72,10 @@ module PseudoCleaner
         end
       end
 
-      def clean_redis(redis)
-        @@redis_classes ||= []
-        @@redis_classes << redis
-      end
+      # def clean_redis(redis)
+      #   @@redis_classes ||= []
+      #   @@redis_classes << redis
+      # end
 
       def database_cleaner
         if Object.const_defined?("ActiveRecord", false) && ActiveRecord.const_defined?("Base", false)
@@ -252,7 +252,7 @@ module PseudoCleaner
 
           PseudoCleaner::MasterCleaner.create_table_cleaners
           PseudoCleaner::MasterCleaner.create_custom_cleaners
-          PseudoCleaner::MasterCleaner.create_redis_cleaners
+          # PseudoCleaner::MasterCleaner.create_redis_cleaners
         end
 
         @@cleaner_classes
@@ -309,13 +309,13 @@ module PseudoCleaner
         end
       end
 
-      def create_redis_cleaners
-        if @@redis_classes
-          @@redis_classes.each do |redis|
-            PseudoCleaner::MasterCleaner.cleaner_classes << [redis, nil, PseudoCleaner::RedisCleaner]
-          end
-        end
-      end
+      # def create_redis_cleaners
+      #   if @@redis_classes
+      #     @@redis_classes.each do |redis|
+      #       PseudoCleaner::MasterCleaner.cleaner_classes << [redis, nil, PseudoCleaner::RedisMonitorCleaner]
+      #     end
+      #   end
+      # end
 
       def find_file_class(seeder_file, seeder_root)
         check_class      = Object
