@@ -213,9 +213,10 @@ module PseudoCleaner
       normalized_command = command.to_s.downcase
 
       if redis.respond_to?(normalized_command)
-        if normalized_command == "pipelined" ||
-            (normalized_command == "multi" && block)
-          @in_multi = true
+        if (normalized_command == "pipelined" ||
+            (normalized_command == "multi" && block)) &&
+            !@suspend_tracking
+          @in_multi          = true
           normalized_command = "exec"
         end
 
@@ -491,6 +492,20 @@ module PseudoCleaner
     end
 
     def synchronize_test_values(&block)
+      if @in_multi
+        # Ideally we should never get here, but if we do, assume everything was changed and keep moving...
+        @multi_commands.each do |args|
+          if WRITE_COMMANDS.include?(args[0])
+            updated_keys.merge(extract_keys(*args))
+          elsif SET_COMMANDS.include?(args[0])
+            updated_keys.merge(extract_keys(*args))
+          end
+        end
+
+        @in_multi       = false
+        @multi_commands = []
+      end
+
       updated_values = updated_keys.dup
 
       @in_redis_cleanup = true
