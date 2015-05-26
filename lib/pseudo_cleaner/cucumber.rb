@@ -33,11 +33,24 @@ class CucumberHook
   end
 
   def start_test(scenario, strategy)
-    PseudoCleaner::MasterCleaner.start_example(scenario, strategy, "PseudoCleaner::start_test - #{report_name(scenario)}")
+    PseudoCleaner::MasterCleaner.start_example(scenario,
+                                               strategy,
+                                               description: "PseudoCleaner::start_test - #{report_name(scenario)}",
+                                               location:    test_location(scenario))
   end
 
   def end_test(scenario)
-    PseudoCleaner::MasterCleaner.end_example(scenario, "PseudoCleaner::end_test - #{report_name(scenario)}")
+    PseudoCleaner::MasterCleaner.end_example(scenario,
+                                             description: "PseudoCleaner::end_test - #{report_name (scenario)}",
+                                             location:    test_location(scenario))
+  end
+
+  def test_location(scenario)
+    if scenario.respond_to?(:feature)
+      "#{scenario.location.file}:#{scenario.location.line}"
+    elsif scenario.respond_to?(:scenario_outline)
+      "#{scenario.scenario_outline.instance_variable_get(:@example_sections)[0][0][0].file}:#{scenario.scenario_outline.instance_variable_get(:@example_sections)[0][0][0].line}"
+    end
   end
 
   def report_name(scenario)
@@ -60,11 +73,13 @@ class CucumberHook
   end
 
   def peek_data_inline(scenario)
-    PseudoCleaner::MasterCleaner.peek_data_inline("PseudoCleaner::peek_data - #{report_name(scenario)}")
+    PseudoCleaner::MasterCleaner.peek_data_inline(description: "PseudoCleaner::peek_data - #{report_name(scenario)}",
+                                                  location:    test_location(scenario))
   end
 
   def peek_data_new_test(scenario)
-    PseudoCleaner::MasterCleaner.peek_data_new_test("PseudoCleaner::peek_data - #{report_name(scenario)}")
+    PseudoCleaner::MasterCleaner.peek_data_new_test(description: "PseudoCleaner::peek_data - #{report_name(scenario)}",
+                                                    location:    test_location(scenario))
   end
 end
 

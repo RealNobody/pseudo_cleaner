@@ -736,8 +736,8 @@ module PseudoCleaner
         else
           PseudoCleaner::Logger.write("  #{peek_name}")
 
-          row_data.each do |updated_value|
-            PseudoCleaner::Logger.write("    #{updated_value}")
+          row_data.each_with_index do |updated_value, index|
+            PseudoCleaner::Logger.write("    #{index}: #{updated_value}")
           end
         end
 

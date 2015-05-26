@@ -32,16 +32,20 @@ module PseudoCleaner
         @@report_error = true
       end
 
-      def within_report_block(description, &block)
+      def within_report_block(options, &block)
         @@report_error = false
         @@report_table = nil
 
         if Object.const_defined?("Cornucopia", false) &&
             Cornucopia.const_defined?("Util", false) &&
             Cornucopia::Util.const_defined?("ReportBuilder", false)
-          Cornucopia::Util::ReportBuilder.current_report.within_test(description) do
-            Cornucopia::Util::ReportBuilder.current_report.within_section(description) do |report|
+          Cornucopia::Util::ReportBuilder.current_report.within_test(options[:description]) do
+            Cornucopia::Util::ReportBuilder.current_report.within_section(options[:description]) do |report|
               report.within_table do |report_table|
+                if options[:location]
+                  report_table.write_stats "location", options[:location]
+                end
+
                 @@report_table = report_table
 
                 block.yield
@@ -62,7 +66,7 @@ module PseudoCleaner
       def start_suite(description = nil)
         description ||= "PseudoCleaner::MasterCleaner.start_suite"
 
-        within_report_block(description) do
+        within_report_block(description: description) do
           if @@suite_cleaner
             @@suite_cleaner.reset_suite
           end
@@ -85,10 +89,10 @@ module PseudoCleaner
         end
       end
 
-      def start_example(example_class, strategy, description = nil)
-        description ||= "PseudoCleaner::MasterCleaner.start_example"
+      def start_example(example_class, strategy, options = {})
+        options[:description] ||= "PseudoCleaner::MasterCleaner.start_example"
 
-        within_report_block(description) do
+        within_report_block(options) do
           pseudo_cleaner_data                 = {}
           pseudo_cleaner_data[:test_strategy] = strategy
 
@@ -107,10 +111,10 @@ module PseudoCleaner
         end
       end
 
-      def end_example(example_class, description = nil)
-        description ||= "PseudoCleaner::MasterCleaner.end_example"
+      def end_example(example_class, options = {})
+        options[:description] ||= "PseudoCleaner::MasterCleaner.end_example"
 
-        within_report_block(description) do
+        within_report_block(options) do
           pseudo_cleaner_data = example_class.instance_variable_get(:@pseudo_cleaner_data)
 
           unless pseudo_cleaner_data[:test_strategy] == :none
@@ -131,7 +135,7 @@ module PseudoCleaner
       def end_suite(description = nil)
         description ||= "PseudoCleaner::MasterCleaner.end_suite"
 
-        within_report_block(description) do
+        within_report_block(description: description) do
           @@suite_cleaner.end test_strategy: :pseudo_delete if @@suite_cleaner
         end
       end
@@ -171,7 +175,7 @@ module PseudoCleaner
       def reset_database(description = nil)
         description ||= "PseudoCleaner::MasterCleaner.reset_database"
 
-        within_report_block(description) do
+        within_report_block(description: description) do
           PseudoCleaner::MasterCleaner.database_cleaner.clean_with(:truncation)
 
           PseudoCleaner::MasterCleaner.database_reset
@@ -340,18 +344,23 @@ module PseudoCleaner
         @@suite_cleaner.review_rows(&block)
       end
 
-      def peek_data_inline(description = nil)
+      def peek_data_inline(options = {})
         @@report_error = false
         @@report_table = nil
 
         if Object.const_defined?("Cornucopia", false) &&
             Cornucopia.const_defined?("Util", false) &&
             Cornucopia::Util.const_defined?("ReportBuilder", false)
-          Cornucopia::Util::ReportBuilder.current_report.within_section(description) do |report|
+          Cornucopia::Util::ReportBuilder.current_report.within_section(options[:description]) do |report|
             report.within_hidden_table do |outer_report_table|
               Cornucopia::Util::ReportTable.new(
                   nested_table:         outer_report_table,
                   suppress_blank_table: true) do |report_table|
+                # redundant, but I like it because it is consistent.
+                if options[:location]
+                  report_table.write_stats "location", options[:location]
+                end
+
                 @@report_table = report_table
 
                 peek_values
@@ -361,16 +370,16 @@ module PseudoCleaner
 
           @@report_table = nil
         else
-          PseudoCleaner::Logger.write(description)
+          PseudoCleaner::Logger.write(options[:description])
 
           peek_values
         end
       end
 
-      def peek_data_new_test(description = nil)
-        description ||= "PseudoCleaner::MasterCleaner.peek_data"
+      def peek_data_new_test(options = {})
+        options[:description] ||= "PseudoCleaner::MasterCleaner.peek_data"
 
-        within_report_block(description) do
+        within_report_block(options) do
           peek_values
         end
       end

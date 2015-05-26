@@ -48,7 +48,10 @@ RSpec.configure do |config|
     new_strategy ||= :transaction
 
     report_name = test_example.full_description
-    PseudoCleaner::MasterCleaner.start_example(test_example, new_strategy, "PseudoCleaner::start_test - #{report_name}")
+    PseudoCleaner::MasterCleaner.start_example(test_example,
+                                               new_strategy,
+                                               description: "PseudoCleaner::start_test - #{report_name}",
+                                               location:    test_example.location)
   end
 
   config.after(:each) do |example|
@@ -61,26 +64,32 @@ RSpec.configure do |config|
       if (test_example.exception)
         if PseudoCleaner::Configuration.instance.enable_full_data_dump_tag ||
             PseudoCleaner::Configuration.instance.peek_data_on_error
-          PseudoCleaner::MasterCleaner.peek_data_inline("PseudoCleaner::peek_data - #{report_name}")
+          PseudoCleaner::MasterCleaner.peek_data_inline(description: "PseudoCleaner::peek_data - #{report_name}",
+                                                        location:    test_example.location)
         end
       else
         if PseudoCleaner::Configuration.instance.enable_full_data_dump_tag ||
             PseudoCleaner::Configuration.instance.peek_data_not_on_error
-          PseudoCleaner::MasterCleaner.peek_data_new_test("PseudoCleaner::peek_data - #{report_name}")
+          PseudoCleaner::MasterCleaner.peek_data_new_test(description: "PseudoCleaner::peek_data - #{report_name}",
+                                                          location:    test_example.location)
         end
       end
     else
       if (test_example.exception)
         if PseudoCleaner::Configuration.instance.peek_data_on_error
-          PseudoCleaner::MasterCleaner.peek_data_inline("PseudoCleaner::peek_data - #{report_name}")
+          PseudoCleaner::MasterCleaner.peek_data_inline(description: "PseudoCleaner::peek_data - #{report_name}",
+                                                        location:    test_example.location)
         end
       else
         if PseudoCleaner::Configuration.instance.peek_data_not_on_error
-          PseudoCleaner::MasterCleaner.peek_data_new_test("PseudoCleaner::peek_data - #{report_name}")
+          PseudoCleaner::MasterCleaner.peek_data_new_test(description: "PseudoCleaner::peek_data - #{report_name}",
+                                                          location:    test_example.location)
         end
       end
     end
 
-    PseudoCleaner::MasterCleaner.end_example(test_example, "PseudoCleaner::end_test - #{report_name}")
+    PseudoCleaner::MasterCleaner.end_example(test_example,
+                                             description: "PseudoCleaner::end_test - #{report_name}",
+                                             location:    test_example.location)
   end
 end

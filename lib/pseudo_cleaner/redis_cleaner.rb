@@ -241,7 +241,9 @@ module PseudoCleaner
           @multi_commands = []
         elsif ["exec", "pipelined"].include?(args[0])
           begin
-            raise "exec response does not match sent commands" unless response.length == @multi_commands.length
+            if (!response && @multi_commands.length > 0) || (response && response.length != @multi_commands.length)
+              raise "exec response does not match sent commands.\n  response: #{response}\n commands: #{@multi_commands}"
+            end
 
             response.each_with_index do |command_response, index|
               process_command(command_response, *(@multi_commands[index]))
@@ -389,7 +391,7 @@ module PseudoCleaner
           updated_values.each do |value|
             if initial_keys.include?(value)
               report_keys << value
-              @suite_altered_keys << value
+              @suite_altered_keys << value unless ignore_key(value)
             else
               redis.del(value)
             end
@@ -448,20 +450,20 @@ module PseudoCleaner
             Cornucopia::Util::ReportTable.new(nested_table:         PseudoCleaner::MasterCleaner.report_table,
                                               nested_table_label:   redis_name,
                                               suppress_blank_table: true) do |report_table|
-              updated_values.each do |updated_value|
+              updated_values.each_with_index do |updated_value, index|
                 unless ignore_key(updated_value)
                   output_values = true
-                  report_table.write_stats updated_value, report_record(updated_value)
+                  report_table.write_stats index.to_s, report_record(updated_value)
                 end
               end
             end
           else
             PseudoCleaner::Logger.write("  #{redis_name}")
 
-            updated_values.each do |updated_value|
+            updated_values.each_with_index do |updated_value, index|
               unless ignore_key(updated_value)
                 output_values = true
-                PseudoCleaner::Logger.write("    #{updated_value}: #{report_record(updated_value)}")
+                PseudoCleaner::Logger.write("    #{index}: #{report_record(updated_value)}")
               end
             end
           end

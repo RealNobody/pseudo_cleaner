@@ -38,7 +38,9 @@ Spinach.hooks.around_scenario do |scenario_data, step_definitions, &block|
                 else
                   :pseudo_delete
                 end
-  PseudoCleaner::MasterCleaner.start_example(scenario_data, strategy, "PseudoCleaner::start_test - #{report_name}")
+  PseudoCleaner::MasterCleaner.start_example(scenario_data,
+                                             strategy,
+                                             description: "PseudoCleaner::start_test - #{report_name}")
 
   begin
     block.call
@@ -47,27 +49,28 @@ Spinach.hooks.around_scenario do |scenario_data, step_definitions, &block|
       if PseudoCleaner::SpinachErrorHandler.exception
         if PseudoCleaner::Configuration.instance.enable_full_data_dump_tag ||
             PseudoCleaner::Configuration.instance.peek_data_on_error
-          PseudoCleaner::MasterCleaner.peek_data_inline("PseudoCleaner::peek_data - #{report_name}")
+          PseudoCleaner::MasterCleaner.peek_data_inline(description: "PseudoCleaner::peek_data - #{report_name}")
         end
       else
         if PseudoCleaner::Configuration.instance.enable_full_data_dump_tag ||
             PseudoCleaner::Configuration.instance.peek_data_not_on_error
-          PseudoCleaner::MasterCleaner.peek_data_new_test("PseudoCleaner::peek_data - #{report_name}")
+          PseudoCleaner::MasterCleaner.peek_data_new_test(description: "PseudoCleaner::peek_data - #{report_name}")
         end
       end
     else
       if PseudoCleaner::SpinachErrorHandler.exception
         if PseudoCleaner::Configuration.instance.peek_data_on_error
-          PseudoCleaner::MasterCleaner.peek_data_inline("PseudoCleaner::peek_data - #{report_name}")
+          PseudoCleaner::MasterCleaner.peek_data_inline(description: "PseudoCleaner::peek_data - #{report_name}")
         end
       else
         if PseudoCleaner::Configuration.instance.peek_data_not_on_error
-          PseudoCleaner::MasterCleaner.peek_data_new_test("PseudoCleaner::peek_data - #{report_name}")
+          PseudoCleaner::MasterCleaner.peek_data_new_test(description: "PseudoCleaner::peek_data - #{report_name}")
         end
       end
     end
 
-    PseudoCleaner::MasterCleaner.end_example(scenario_data, "PseudoCleaner::end_test - #{report_name}")
+    PseudoCleaner::MasterCleaner.end_example(scenario_data,
+                                             description: "PseudoCleaner::end_test - #{report_name}")
     PseudoCleaner::SpinachErrorHandler.exception = nil
   end
 end
