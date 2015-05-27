@@ -18,6 +18,7 @@ module PseudoCleaner
     attr_accessor :peek_data_on_error
     attr_accessor :peek_data_not_on_error
     attr_accessor :enable_full_data_dump_tag
+    attr_accessor :disable_cornucopia_output
 
     def self.current_instance
       self.instance
