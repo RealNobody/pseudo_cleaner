@@ -350,7 +350,8 @@ module PseudoCleaner
 
         if Object.const_defined?("Cornucopia", false) &&
             Cornucopia.const_defined?("Util", false) &&
-            Cornucopia::Util.const_defined?("ReportBuilder", false)
+            Cornucopia::Util.const_defined?("ReportBuilder", false) &&
+            !PseudoCleaner::Configuration.current_instance.disable_cornucopia_output
           Cornucopia::Util::ReportBuilder.current_report.within_section(options[:description]) do |report|
             report.within_hidden_table do |outer_report_table|
               Cornucopia::Util::ReportTable.new(

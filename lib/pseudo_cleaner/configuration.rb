@@ -33,6 +33,7 @@ module PseudoCleaner
       @peek_data_on_error          = true
       @peek_data_not_on_error      = false
       @enable_full_data_dump_tag   = true
+      @disable_cornucopia_output   = false
     end
 
     # Backwards comaptibility...

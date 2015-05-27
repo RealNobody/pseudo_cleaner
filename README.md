@@ -145,6 +145,98 @@ Cleaners must also include one or more of the following funcitons:
 
 A Cleaner can adjust when it is called in relation to other cleaners by overriding the instance method `<=>`
 
+### Redis Cleaner
+
+The RedisCleaner is a base class for a Custom Cleaner you must create yourself.  The RedisCleaner is designed to work
+by replacing your existing redis class with a tracking redis class.  It will track your updates as you make calls and
+then clean them up when you are done.
+
+An example implementation where the default redis used by the system is `$redis`.  (In other cases, you may want to 
+use mocking to swap out the redis instance...)
+
+This in the file:  db\cleaners\redis_cleaner.rb in the project...
+
+    class RedisCleaner < PseudoCleaner::RedisCleaner
+      attr_reader :test_ignore_regex
+      attr_reader :current_ignore_regex
+
+      BASE_IGNORE =
+          [
+              /rc-analytics::exports:actions:partner_last_run_dates/,
+              /rack\|whitelist_cache\|hash_data/,
+              /SequelModelCache/,
+              /active_sessions/,
+          ]
+
+      def ignore_regexes
+        current_ignore_regex
+      end
+
+      def ignore_durring_test(additional_ignore_regexes, &block)
+        orig_test_ignore_regex = test_ignore_regex
+        begin
+          @test_ignore_regex    = [*additional_ignore_regexes, *test_ignore_regex]
+          @current_ignore_regex = [*RedisCleaner::BASE_IGNORE, *test_ignore_regex]
+
+          block.yield
+        ensure
+          @test_ignore_regex    = orig_test_ignore_regex
+          @current_ignore_regex = [*RedisCleaner::BASE_IGNORE, *test_ignore_regex]
+        end
+      end
+
+      def initialize(*args)
+        super(*args)
+
+        @current_ignore_regex = RedisCleaner::BASE_IGNORE
+        @test_ignore_regex    = []
+        @redis                = $redis
+        $redis                = self
+
+        Redis.current        = $redis
+        Ohm.redis            = $redis
+        Redis::Objects.redis = $redis
+      end
+    end
+
+The main point here is that I set the value of @redis to the redis instance I want to use, and then "replace" that 
+redis instance in the code with the RedisCleaner class.
+
+## Configurations
+
+As the system evolves, I keep adding new and different options.  Here is a summary of what some of them do at least:
+
+* **output_diagnostics**
+  Output diagnostic information at various points in the process.  This would include the level set starting point of
+  a table, what rows were deleted, etc.
+* **clean_database_before_tests**
+  Delete all data in all tables can call SortedSeeer to re-seed the database before any tests are run.  This is 
+  defaulted to false because this can be time-consuming and many automated testing systems already do this for you.
+* **reset_auto_increment**
+  Defaulted to true, this will set the auto-increment value for a table to the highest id + 1 when the system starts.
+* **post_transaction_analysis**
+  An early version of the peek-data function.  This will output information about every table at the end of the test.
+  The data output will match the initial state data if `output_diagnostics` is true.
+* **peek_data_on_error**
+  Defaulted to true, this will output a dump of all of the new values in the database if an error occured in the test.
+* **peek_data_not_on_error**
+  If set to true, this will output a dump of all of the new values in the database at the end of every test.  This 
+  functionality can also be achieved by tagging your test with `:full_data_dump` (RSpec) or `@full_data_dump` 
+  (Cucumber and Spinach).
+* **enable_full_data_dump_tag**
+  Defaulted to true, this allows the `full_data_dump` tag to work.  If set to false, the tag will be ignored.
+* **disable_cornucopia_output**
+  If set to false, this will force all output to be done through the registered logger which defaults to simply 
+  outputing data to stdout.
+
+## Cornucopia integration
+
+I have another gem that I use a lot called `cornucopia`.  I like it because it gives me really useful reports on what
+happened in my tests.
+
+I have updated this gem to use Cornucopia to output most of the information to be output by the gem.  You can disable
+this feature by setting `disable_cornucopia_output` to true.
+
 ## Contributing
 
 1. Fork it

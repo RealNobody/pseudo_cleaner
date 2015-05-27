@@ -110,6 +110,7 @@ module PseudoCleaner
             "sunionstore",
             "zincrby",
             "zinterstore",
+            "[]=",
         ]
     READ_COMMANDS  =
         [
@@ -159,6 +160,7 @@ module PseudoCleaner
             "zscan",
             "zscan_each",
             "zscore",
+            "[]",
         ]
 
     attr_reader :initial_keys
@@ -242,11 +244,24 @@ module PseudoCleaner
         elsif ["exec", "pipelined"].include?(args[0])
           begin
             if (!response && @multi_commands.length > 0) || (response && response.length != @multi_commands.length)
-              raise "exec response does not match sent commands.\n  response: #{response}\n commands: #{@multi_commands}"
+              puts "exec response does not match sent commands.\n  response: #{response}\n  commands: #{@multi_commands}"
+
+              # make the response length match the commands length.
+              # so far the only time this has happened was when a multi returned nil which SHOULD indicate a failure
+              #
+              # I am assuming that the multi failed in this case, but even if so, it is safest for tracking purposes
+              # to assume that redis DID change and record it as such.  Even if I am wrong, for the cleaner, it
+              # doesn't matter, and there is no harm.
+              response ||= []
+              @multi_commands.each_with_index do |command, index|
+                if response.length < index
+                  response << true
+                end
+              end
             end
 
-            response.each_with_index do |command_response, index|
-              process_command(command_response, *(@multi_commands[index]))
+            @multi_commands.each_with_index do |command, index|
+              process_command(response[index], *command)
             end
           ensure
             @in_multi       = false
@@ -258,7 +273,14 @@ module PseudoCleaner
         elsif WRITE_COMMANDS.include?(args[0])
           updated_keys.merge(extract_keys(*args))
         elsif SET_COMMANDS.include?(args[0])
-          if [true, false].include?(response) ? response : (response > 0)
+          update_key = true
+          if [true, false].include?(response)
+            update_key = response
+          else
+            update_key = response > 0 rescue true
+          end
+
+          if update_key
             updated_keys.merge(extract_keys(*args))
           end
         end
