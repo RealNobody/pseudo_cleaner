@@ -399,6 +399,8 @@ module PseudoCleaner
           end
         end
       end
+
+      @updated_keys = SortedSet.new
     end
 
     def test_end test_strategy
@@ -422,6 +424,8 @@ module PseudoCleaner
           report_dirty_values "initial values altered by test", report_keys
         end
       end
+
+      @updated_keys = SortedSet.new
     end
 
     def suite_end test_strategy
@@ -539,8 +543,6 @@ module PseudoCleaner
       ensure
         @in_redis_cleanup = false
       end
-
-      @updated_keys = SortedSet.new
     end
 
     def start_monitor
