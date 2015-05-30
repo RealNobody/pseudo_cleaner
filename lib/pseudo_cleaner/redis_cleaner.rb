@@ -372,9 +372,15 @@ module PseudoCleaner
     end
 
     def suite_start test_strategy
-      @test_strategy ||= test_strategy
+      time = Benchmark.measure do
+        puts "  RedisCleaner(#{redis_name})" if PseudoCleaner::Configuration.instance.benchmark
 
-      start_monitor
+        @test_strategy ||= test_strategy
+
+        start_monitor
+      end
+
+      puts "  RedisCleaner(#{redis_name}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
     end
 
     def suspend_tracking(&block)
@@ -390,52 +396,76 @@ module PseudoCleaner
     def test_start test_strategy
       @test_strategy ||= test_strategy
 
-      synchronize_test_values do |test_values|
-        if test_values && !test_values.empty?
-          report_dirty_values "values altered before the test started", test_values
+      time = Benchmark.measure do
+        puts "  RedisCleaner(#{redis_name})" if PseudoCleaner::Configuration.instance.benchmark
 
-          test_values.each do |value|
-            redis.del value unless initial_keys.include?(value)
+        synchronize_test_values do |test_values|
+          if test_values && !test_values.empty?
+            report_dirty_values "values altered before the test started", test_values
+
+            test_values.each do |value|
+              redis.del value unless initial_keys.include?(value)
+            end
           end
         end
+
+        @updated_keys = SortedSet.new
       end
 
-      @updated_keys = SortedSet.new
+      puts "  RedisCleaner(#{redis_name}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
     end
 
     def test_end test_strategy
-      synchronize_test_values do |updated_values|
-        if updated_values && !updated_values.empty?
-          report_keys = []
+      time = Benchmark.measure do
+        puts "  RedisCleaner(#{redis_name})" if PseudoCleaner::Configuration.instance.benchmark
 
-          if @options[:output_diagnostics]
-            report_dirty_values "updated values", updated_values
-          end
+        synchronize_test_values do |updated_values|
+          if updated_values && !updated_values.empty?
+            report_keys = []
 
-          updated_values.each do |value|
-            if initial_keys.include?(value)
-              report_keys << value
-              @suite_altered_keys << value unless ignore_key(value)
-            else
-              redis.del(value)
+            if @options[:output_diagnostics]
+              report_dirty_values "updated values", updated_values
             end
-          end
 
-          report_dirty_values "initial values altered by test", report_keys
+            updated_values.each do |value|
+              if initial_keys.include?(value)
+                report_keys << value
+                @suite_altered_keys << value unless ignore_key(value)
+              else
+                redis.del(value)
+              end
+            end
+
+            report_dirty_values "initial values altered by test", report_keys
+          end
         end
+
+        @updated_keys = SortedSet.new
       end
 
-      @updated_keys = SortedSet.new
+      puts "  RedisCleaner(#{redis_name}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
     end
 
     def suite_end test_strategy
-      report_end_of_suite_state "suite end"
+      time = Benchmark.measure do
+        puts "  RedisCleaner(#{redis_name})" if PseudoCleaner::Configuration.instance.benchmark
+
+        report_end_of_suite_state "suite end"
+      end
+
+      puts "  RedisCleaner(#{redis_name}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
     end
 
     def reset_suite
-      report_end_of_suite_state "reset suite"
+      time = Benchmark.measure do
+        puts "  RedisCleaner(#{redis_name})" if PseudoCleaner::Configuration.instance.benchmark
 
-      start_monitor
+        report_end_of_suite_state "reset suite"
+
+        start_monitor
+      end
+
+      puts "  RedisCleaner(#{redis_name}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
     end
 
     def ignore_regexes
@@ -456,47 +486,59 @@ module PseudoCleaner
     end
 
     def review_rows(&block)
-      synchronize_test_values do |updated_values|
-        if updated_values && !updated_values.empty?
-          updated_values.each do |updated_value|
-            unless ignore_key(updated_value)
-              block.yield redis_name, report_record(updated_value)
+      time = Benchmark.measure do
+        puts "  RedisCleaner(#{redis_name})" if PseudoCleaner::Configuration.instance.benchmark
+
+        synchronize_test_values do |updated_values|
+          if updated_values && !updated_values.empty?
+            updated_values.each do |updated_value|
+              unless ignore_key(updated_value)
+                block.yield redis_name, report_record(updated_value)
+              end
             end
           end
         end
       end
+
+      puts "  RedisCleaner(#{redis_name}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
     end
 
     def peek_values
-      synchronize_test_values do |updated_values|
-        if updated_values && !updated_values.empty?
-          output_values = false
+      time = Benchmark.measure do
+        puts "  RedisCleaner(#{redis_name})" if PseudoCleaner::Configuration.instance.benchmark
 
-          if PseudoCleaner::MasterCleaner.report_table
-            Cornucopia::Util::ReportTable.new(nested_table:         PseudoCleaner::MasterCleaner.report_table,
-                                              nested_table_label:   redis_name,
-                                              suppress_blank_table: true) do |report_table|
+        synchronize_test_values do |updated_values|
+          if updated_values && !updated_values.empty?
+            output_values = false
+
+            if PseudoCleaner::MasterCleaner.report_table
+              Cornucopia::Util::ReportTable.new(nested_table:         PseudoCleaner::MasterCleaner.report_table,
+                                                nested_table_label:   redis_name,
+                                                suppress_blank_table: true) do |report_table|
+                updated_values.each_with_index do |updated_value, index|
+                  unless ignore_key(updated_value)
+                    output_values = true
+                    report_table.write_stats index.to_s, report_record(updated_value)
+                  end
+                end
+              end
+            else
+              PseudoCleaner::Logger.write("  #{redis_name}")
+
               updated_values.each_with_index do |updated_value, index|
                 unless ignore_key(updated_value)
                   output_values = true
-                  report_table.write_stats index.to_s, report_record(updated_value)
+                  PseudoCleaner::Logger.write("    #{index}: #{report_record(updated_value)}")
                 end
               end
             end
-          else
-            PseudoCleaner::Logger.write("  #{redis_name}")
 
-            updated_values.each_with_index do |updated_value, index|
-              unless ignore_key(updated_value)
-                output_values = true
-                PseudoCleaner::Logger.write("    #{index}: #{report_record(updated_value)}")
-              end
-            end
+            PseudoCleaner::MasterCleaner.report_error if output_values
           end
-
-          PseudoCleaner::MasterCleaner.report_error if output_values
         end
       end
+
+      puts "  RedisCleaner(#{redis_name}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
     end
 
     def report_end_of_suite_state report_reason

@@ -5,7 +5,15 @@ module PseudoCleaner
     @@initial_states = {}
 
     def reset_suite
-      @@initial_states = {}
+      initial_state = @@initial_states[@table]
+
+      time = Benchmark.measure do
+        puts "  TableCleaner(#{initial_state[:table_name]})" if PseudoCleaner::Configuration.instance.benchmark
+
+        @@initial_states = {}
+      end
+
+      puts "  TableCleaner(#{initial_state[:table_name]}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
     end
 
     def initialize(start_method, end_method, table, options = {})
@@ -70,12 +78,28 @@ module PseudoCleaner
 
     def test_start test_strategy
       @test_strategy ||= test_strategy
-      save_state
+      initial_state  = @@initial_states[@table]
+
+      time = Benchmark.measure do
+        puts "  TableCleaner(#{initial_state[:table_name]})" if PseudoCleaner::Configuration.instance.benchmark
+
+        save_state
+      end
+
+      puts "  TableCleaner(#{initial_state[:table_name]}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
     end
 
     def suite_start test_strategy
       @test_strategy ||= test_strategy
-      save_state
+      initial_state  = @@initial_states[@table]
+
+      time = Benchmark.measure do
+        puts "  TableCleaner(#{initial_state[:table_name]})" if PseudoCleaner::Configuration.instance.benchmark
+
+        save_state
+      end
+
+      puts "  TableCleaner(#{initial_state[:table_name]}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
     end
 
     def within_report_block(description, conditional, &block)
@@ -243,58 +267,79 @@ module PseudoCleaner
     def test_end test_strategy
       initial_state = @@initial_states[@table]
 
-      within_report_block(initial_state[:table_name], @options[:output_diagnostics]) do
-        reset_table test_strategy, false, false
+      time = Benchmark.measure do
+        puts "  TableCleaner(#{initial_state[:table_name]})" if PseudoCleaner::Configuration.instance.benchmark
+
+
+        within_report_block(initial_state[:table_name], @options[:output_diagnostics]) do
+          reset_table test_strategy, false, false
+        end
       end
+
+      puts "  TableCleaner(#{initial_state[:table_name]}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
     end
 
     def suite_end test_strategy
       initial_state = @@initial_states[@table]
 
-      within_report_block(initial_state[:table_name], @options[:output_diagnostics]) do
-        reset_table test_strategy, true, true
+      time = Benchmark.measure do
+        puts "  TableCleaner(#{initial_state[:table_name]})" if PseudoCleaner::Configuration.instance.benchmark
+
+
+        within_report_block(initial_state[:table_name], @options[:output_diagnostics]) do
+          reset_table test_strategy, true, true
+        end
       end
+
+      puts "  TableCleaner(#{initial_state[:table_name]}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
     end
 
     def reset_table test_strategy, require_output, is_suite_end
       initial_state = @@initial_states[@table]
 
-      if @test_strategy != test_strategy && !PseudoCleaner::Configuration.current_instance.single_cleaner_set
-        if @options[:output_diagnostics]
-          PseudoCleaner::MasterCleaner.report_error
+      time = Benchmark.measure do
+        puts "  TableCleaner(#{initial_state[:table_name]})" if PseudoCleaner::Configuration.instance.benchmark
 
-          if @report_table
-            @report_table.write_stats("WARNING", "*** The ending strategy for \"#{initial_state[:table_name]}\" changed! ***")
-          else
-            PseudoCleaner::Logger.write("  *** The ending strategy for \"#{initial_state[:table_name]}\" changed! ***".red.on_light_white)
+
+        if @test_strategy != test_strategy && !PseudoCleaner::Configuration.current_instance.single_cleaner_set
+          if @options[:output_diagnostics]
+            PseudoCleaner::MasterCleaner.report_error
+
+            if @report_table
+              @report_table.write_stats("WARNING", "*** The ending strategy for \"#{initial_state[:table_name]}\" changed! ***")
+            else
+              PseudoCleaner::Logger.write("  *** The ending strategy for \"#{initial_state[:table_name]}\" changed! ***".red.on_light_white)
+            end
+          end
+        end
+
+        if test_strategy == :pseudo_delete || PseudoCleaner::Configuration.current_instance.post_transaction_analysis
+          # we should check the relationships for any records which still refer to
+          # a now deleted record.  (i.e. if we updated a record to refer to a record)
+          # we deleted...
+          #
+          # Which is why this is not a common or particularly good solution.
+          #
+          # I'm using it because it is faster than reseeding each test...
+          # And, I can be responsible for worrying about referential integrity in the test
+          # if I want to...
+          pre_string = "  Resetting table \"#{initial_state[:table_name]}\" for #{test_strategy}..."
+          pre_string = "Tests ended without cleaning up properly!!!\n" + pre_string if require_output
+          pre_string = pre_string.red.on_light_white if require_output
+
+          require_output ||= @options[:output_diagnostics]
+
+          if initial_state[:table_is_active_record]
+            test_end_active_record test_strategy, pre_string, require_output, is_suite_end
+          end
+
+          if initial_state[:table_is_sequel_model]
+            test_end_sequel_model test_strategy, pre_string, require_output, is_suite_end
           end
         end
       end
 
-      if test_strategy == :pseudo_delete || PseudoCleaner::Configuration.current_instance.post_transaction_analysis
-        # we should check the relationships for any records which still refer to
-        # a now deleted record.  (i.e. if we updated a record to refer to a record)
-        # we deleted...
-        #
-        # Which is why this is not a common or particularly good solution.
-        #
-        # I'm using it because it is faster than reseeding each test...
-        # And, I can be responsible for worrying about referential integrity in the test
-        # if I want to...
-        pre_string = "  Resetting table \"#{initial_state[:table_name]}\" for #{test_strategy}..."
-        pre_string = "Tests ended without cleaning up properly!!!\n" + pre_string if require_output
-        pre_string = pre_string.red.on_light_white if require_output
-
-        require_output ||= @options[:output_diagnostics]
-
-        if initial_state[:table_is_active_record]
-          test_end_active_record test_strategy, pre_string, require_output, is_suite_end
-        end
-
-        if initial_state[:table_is_sequel_model]
-          test_end_sequel_model test_strategy, pre_string, require_output, is_suite_end
-        end
-      end
+      puts "  TableCleaner(#{initial_state[:table_name]}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
     end
 
     def test_end_active_record test_strategy, pre_string, require_output, is_suite_end
@@ -646,15 +691,22 @@ module PseudoCleaner
     def review_rows(&block)
       initial_state = @@initial_states[@table]
 
-      if initial_state
-        if initial_state[:table_is_active_record]
-          review_rows_active_record &block
-        end
+      time = Benchmark.measure do
+        puts "  TableCleaner(#{initial_state[:table_name]})" if PseudoCleaner::Configuration.instance.benchmark
 
-        if initial_state[:table_is_sequel_model]
-          review_rows_sequel_model &block
+
+        if initial_state
+          if initial_state[:table_is_active_record]
+            review_rows_active_record &block
+          end
+
+          if initial_state[:table_is_sequel_model]
+            review_rows_sequel_model &block
+          end
         end
       end
+
+      puts "  TableCleaner(#{initial_state[:table_name]}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
     end
 
     def review_rows_active_record(&block)
@@ -714,35 +766,43 @@ module PseudoCleaner
     end
 
     def peek_values
-      row_data  = []
-      peek_name = nil
+      row_data      = []
+      peek_name     = nil
+      initial_state = @@initial_states[@table]
 
-      review_rows do |table_name, table_values|
-        peek_name = table_name
-        row_data << table_values
-      end
+      time = Benchmark.measure do
+        puts "  TableCleaner(#{initial_state[:table_name]})" if PseudoCleaner::Configuration.instance.benchmark
 
-      if row_data && !row_data.empty?
-        output_values = false
 
-        if PseudoCleaner::MasterCleaner.report_table
-          Cornucopia::Util::ReportTable.new(nested_table:         PseudoCleaner::MasterCleaner.report_table,
-                                            nested_table_label:   peek_name,
-                                            suppress_blank_table: true) do |report_table|
-            row_data.each_with_index do |row, row_index|
-              report_table.write_stats row_index.to_s, row
-            end
-          end
-        else
-          PseudoCleaner::Logger.write("  #{peek_name}")
-
-          row_data.each_with_index do |updated_value, index|
-            PseudoCleaner::Logger.write("    #{index}: #{updated_value}")
-          end
+        review_rows do |table_name, table_values|
+          peek_name = table_name
+          row_data << table_values
         end
 
-        PseudoCleaner::MasterCleaner.report_error
+        if row_data && !row_data.empty?
+          output_values = false
+
+          if PseudoCleaner::MasterCleaner.report_table
+            Cornucopia::Util::ReportTable.new(nested_table:         PseudoCleaner::MasterCleaner.report_table,
+                                              nested_table_label:   peek_name,
+                                              suppress_blank_table: true) do |report_table|
+              row_data.each_with_index do |row, row_index|
+                report_table.write_stats row_index.to_s, row
+              end
+            end
+          else
+            PseudoCleaner::Logger.write("  #{peek_name}")
+
+            row_data.each_with_index do |updated_value, index|
+              PseudoCleaner::Logger.write("    #{index}: #{updated_value}")
+            end
+          end
+
+          PseudoCleaner::MasterCleaner.report_error
+        end
       end
+
+      puts "  TableCleaner(#{initial_state[:table_name]}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
     end
   end
 end

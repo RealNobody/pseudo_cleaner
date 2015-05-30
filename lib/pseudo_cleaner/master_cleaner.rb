@@ -66,14 +66,19 @@ module PseudoCleaner
       def start_suite(description = nil)
         description ||= "PseudoCleaner::MasterCleaner.start_suite"
 
-        within_report_block(description: description) do
-          if @@suite_cleaner
-            @@suite_cleaner.reset_suite
+        time = Benchmark.measure do
+          puts description if PseudoCleaner::Configuration.instance.benchmark
+
+          within_report_block(description: description) do
+            if @@suite_cleaner
+              @@suite_cleaner.reset_suite
+            end
+            @@suite_cleaner = PseudoCleaner::MasterCleaner.new(:suite)
+            @@suite_cleaner.start :pseudo_delete
+            @@suite_cleaner
           end
-          @@suite_cleaner = PseudoCleaner::MasterCleaner.new(:suite)
-          @@suite_cleaner.start :pseudo_delete
-          @@suite_cleaner
         end
+        puts "#{description} time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
       end
 
       # def clean_redis(redis)
@@ -92,52 +97,69 @@ module PseudoCleaner
       def start_example(example_class, strategy, options = {})
         options[:description] ||= "PseudoCleaner::MasterCleaner.start_example"
 
-        within_report_block(options) do
-          pseudo_cleaner_data                 = {}
-          pseudo_cleaner_data[:test_strategy] = strategy
+        time = Benchmark.measure do
+          puts options[:description] if PseudoCleaner::Configuration.instance.benchmark
 
-          unless strategy == :none
-            raise "invalid strategy" unless PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES.has_key? strategy
+          within_report_block(options) do
+            pseudo_cleaner_data                 = {}
+            pseudo_cleaner_data[:test_strategy] = strategy
 
-            DatabaseCleaner.strategy = PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES[strategy]
-            unless [:pseudo_delete].include? strategy
-              PseudoCleaner::MasterCleaner.database_cleaner.start
+            unless strategy == :none
+              raise "invalid strategy" unless PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES.has_key? strategy
+
+              DatabaseCleaner.strategy = PseudoCleaner::MasterCleaner::DB_CLEANER_CLEANING_STRATEGIES[strategy]
+              unless [:pseudo_delete].include? strategy
+                PseudoCleaner::MasterCleaner.database_cleaner.start
+              end
+
+              pseudo_cleaner_data[:pseudo_state] = PseudoCleaner::MasterCleaner.start_test strategy
             end
 
-            pseudo_cleaner_data[:pseudo_state] = PseudoCleaner::MasterCleaner.start_test strategy
+            example_class.instance_variable_set(:@pseudo_cleaner_data, pseudo_cleaner_data)
           end
-
-          example_class.instance_variable_set(:@pseudo_cleaner_data, pseudo_cleaner_data)
         end
+
+        puts "#{options[:description]} time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
       end
 
       def end_example(example_class, options = {})
         options[:description] ||= "PseudoCleaner::MasterCleaner.end_example"
 
-        within_report_block(options) do
-          pseudo_cleaner_data = example_class.instance_variable_get(:@pseudo_cleaner_data)
+        time = Benchmark.measure do
+          puts options[:description] if PseudoCleaner::Configuration.instance.benchmark
 
-          unless pseudo_cleaner_data[:test_strategy] == :none
-            unless [:pseudo_delete].include? pseudo_cleaner_data[:test_strategy]
-              PseudoCleaner::MasterCleaner.database_cleaner.clean
+          within_report_block(options) do
+            pseudo_cleaner_data = example_class.instance_variable_get(:@pseudo_cleaner_data)
+
+            unless pseudo_cleaner_data[:test_strategy] == :none
+              unless [:pseudo_delete].include? pseudo_cleaner_data[:test_strategy]
+                PseudoCleaner::MasterCleaner.database_cleaner.clean
+              end
+
+              case pseudo_cleaner_data[:test_strategy]
+                when :deletion, :truncation
+                  PseudoCleaner::MasterCleaner.database_reset
+              end
+
+              pseudo_cleaner_data[:pseudo_state].end test_type: :test, test_strategy: pseudo_cleaner_data[:test_strategy]
             end
-
-            case pseudo_cleaner_data[:test_strategy]
-              when :deletion, :truncation
-                PseudoCleaner::MasterCleaner.database_reset
-            end
-
-            pseudo_cleaner_data[:pseudo_state].end test_type: :test, test_strategy: pseudo_cleaner_data[:test_strategy]
           end
         end
+        puts "#{options[:description]} time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
       end
 
       def end_suite(description = nil)
         description ||= "PseudoCleaner::MasterCleaner.end_suite"
 
-        within_report_block(description: description) do
-          @@suite_cleaner.end test_strategy: :pseudo_delete if @@suite_cleaner
+        time = Benchmark.measure do
+          puts description if PseudoCleaner::Configuration.instance.benchmark
+
+          within_report_block(description: description) do
+            @@suite_cleaner.end test_strategy: :pseudo_delete if @@suite_cleaner
+          end
         end
+
+        puts "#{description} time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
       end
 
       def start_test test_strategy
@@ -175,11 +197,16 @@ module PseudoCleaner
       def reset_database(description = nil)
         description ||= "PseudoCleaner::MasterCleaner.reset_database"
 
-        within_report_block(description: description) do
-          PseudoCleaner::MasterCleaner.database_cleaner.clean_with(:truncation)
+        time = Benchmark.measure do
+          puts description if PseudoCleaner::Configuration.instance.benchmark
 
-          PseudoCleaner::MasterCleaner.database_reset
+          within_report_block(description: description) do
+            PseudoCleaner::MasterCleaner.database_cleaner.clean_with(:truncation)
+
+            PseudoCleaner::MasterCleaner.database_reset
+          end
         end
+        puts "#{description} time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
       end
 
       def database_reset
@@ -254,9 +281,14 @@ module PseudoCleaner
         unless @@cleaner_classes
           @@cleaner_classes = []
 
-          PseudoCleaner::MasterCleaner.create_table_cleaners
-          PseudoCleaner::MasterCleaner.create_custom_cleaners
-          # PseudoCleaner::MasterCleaner.create_redis_cleaners
+          time = Benchmark.measure do
+            puts "    Gathering cleaners" if PseudoCleaner::Configuration.instance.benchmark
+
+            PseudoCleaner::MasterCleaner.create_table_cleaners
+            PseudoCleaner::MasterCleaner.create_custom_cleaners
+            # PseudoCleaner::MasterCleaner.create_redis_cleaners
+          end
+          puts "    Gathering cleaners time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
         end
 
         @@cleaner_classes
@@ -348,41 +380,54 @@ module PseudoCleaner
         @@report_error = false
         @@report_table = nil
 
-        if Object.const_defined?("Cornucopia", false) &&
-            Cornucopia.const_defined?("Util", false) &&
-            Cornucopia::Util.const_defined?("ReportBuilder", false) &&
-            !PseudoCleaner::Configuration.current_instance.disable_cornucopia_output
-          Cornucopia::Util::ReportBuilder.current_report.within_section(options[:description]) do |report|
-            report.within_hidden_table do |outer_report_table|
-              Cornucopia::Util::ReportTable.new(
-                  nested_table:         outer_report_table,
-                  suppress_blank_table: true) do |report_table|
-                # redundant, but I like it because it is consistent.
-                if options[:location]
-                  report_table.write_stats "location", options[:location]
+        options[:description] ||= "PseudoCleaner::MasterCleaner.peek_data"
+
+        time = Benchmark.measure do
+          puts options[:description] if PseudoCleaner::Configuration.instance.benchmark
+
+          if Object.const_defined?("Cornucopia", false) &&
+              Cornucopia.const_defined?("Util", false) &&
+              Cornucopia::Util.const_defined?("ReportBuilder", false) &&
+              !PseudoCleaner::Configuration.current_instance.disable_cornucopia_output
+            Cornucopia::Util::ReportBuilder.current_report.within_section(options[:description]) do |report|
+              report.within_hidden_table do |outer_report_table|
+                Cornucopia::Util::ReportTable.new(
+                    nested_table:         outer_report_table,
+                    suppress_blank_table: true) do |report_table|
+                  # redundant, but I like it because it is consistent.
+                  if options[:location]
+                    report_table.write_stats "location", options[:location]
+                  end
+
+                  @@report_table = report_table
+
+                  peek_values
                 end
-
-                @@report_table = report_table
-
-                peek_values
               end
             end
+
+            @@report_table = nil
+          else
+            PseudoCleaner::Logger.write(options[:description])
+
+            peek_values
           end
-
-          @@report_table = nil
-        else
-          PseudoCleaner::Logger.write(options[:description])
-
-          peek_values
         end
+
+        puts "#{options[:description]} time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
       end
 
       def peek_data_new_test(options = {})
         options[:description] ||= "PseudoCleaner::MasterCleaner.peek_data"
 
-        within_report_block(options) do
-          peek_values
+        time = Benchmark.measure do
+          puts options[:description] if PseudoCleaner::Configuration.instance.benchmark
+
+          within_report_block(options) do
+            peek_values
+          end
         end
+        puts "#{options[:description]} time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
       end
 
       def peek_values
@@ -403,45 +448,50 @@ module PseudoCleaner
         @cleaners      = []
         @test_strategy = test_strategy
 
-        start_method = "#{test_type}_start".to_sym
-        end_method   = "#{test_type}_end".to_sym
+        time = Benchmark.measure do
+          puts "  Building cleaners" if PseudoCleaner::Configuration.instance.benchmark
 
-        PseudoCleaner::MasterCleaner.cleaner_classes.each do |clean_class|
-          table = clean_class[0]
-          table ||= clean_class[1]
+          start_method = "#{test_type}_start".to_sym
+          end_method   = "#{test_type}_end".to_sym
 
-          begin
-            @cleaners << clean_class[2].new(start_method, end_method, table, options)
-          rescue Exception => error
-            puts error.to_s
-            raise error
+          PseudoCleaner::MasterCleaner.cleaner_classes.each do |clean_class|
+            table = clean_class[0]
+            table ||= clean_class[1]
+
+            begin
+              @cleaners << clean_class[2].new(start_method, end_method, table, options)
+            rescue Exception => error
+              puts error.to_s
+              raise error
+            end
           end
-        end
 
-        unless @@cleaner_classes_sorted
-          seed_sorts = @cleaners.map { |cleaner| SortedSeeder::Seeder::SeederSorter.new(cleaner) }
-          seed_sorts.sort!
+          unless @@cleaner_classes_sorted
+            seed_sorts = @cleaners.map { |cleaner| SortedSeeder::Seeder::SeederSorter.new(cleaner) }
+            seed_sorts.sort!
 
-          @cleaners = seed_sorts.map(&:seed_base_object)
+            @cleaners = seed_sorts.map(&:seed_base_object)
 
-          sorted_classes = []
-          @cleaners.each do |cleaner|
-            cleaner_class = PseudoCleaner::MasterCleaner.cleaner_classes.detect do |unsorted_cleaner|
-              if cleaner.class == unsorted_cleaner[2]
-                if unsorted_cleaner[2] == PseudoCleaner::TableCleaner
-                  cleaner.table == unsorted_cleaner[0] || cleaner.table == unsorted_cleaner[1]
-                else
-                  true
+            sorted_classes = []
+            @cleaners.each do |cleaner|
+              cleaner_class = PseudoCleaner::MasterCleaner.cleaner_classes.detect do |unsorted_cleaner|
+                if cleaner.class == unsorted_cleaner[2]
+                  if unsorted_cleaner[2] == PseudoCleaner::TableCleaner
+                    cleaner.table == unsorted_cleaner[0] || cleaner.table == unsorted_cleaner[1]
+                  else
+                    true
+                  end
                 end
               end
+
+              sorted_classes << cleaner_class
             end
 
-            sorted_classes << cleaner_class
+            @@cleaner_classes        = sorted_classes
+            @@cleaner_classes_sorted = true
           end
-
-          @@cleaner_classes        = sorted_classes
-          @@cleaner_classes_sorted = true
         end
+        puts "  Building cleaners time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
       end
 
       start_all_cleaners options

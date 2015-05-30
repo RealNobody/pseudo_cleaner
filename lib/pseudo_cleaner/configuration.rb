@@ -19,6 +19,7 @@ module PseudoCleaner
     attr_accessor :peek_data_not_on_error
     attr_accessor :enable_full_data_dump_tag
     attr_accessor :disable_cornucopia_output
+    attr_accessor :benchmark
 
     def self.current_instance
       self.instance
@@ -35,6 +36,7 @@ module PseudoCleaner
       @peek_data_not_on_error      = false
       @enable_full_data_dump_tag   = true
       @disable_cornucopia_output   = false
+      @benchmark                   = false
     end
 
     # Backwards comaptibility...
