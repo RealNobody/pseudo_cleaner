@@ -1,5 +1,5 @@
 require "redis"
-require "redis-namespace"
+# require "redis-namespace"
 require "pseudo_cleaner/master_cleaner"
 require "pseudo_cleaner/configuration"
 require "pseudo_cleaner/logger"
@@ -36,27 +36,215 @@ module PseudoCleaner
   # I'm not a huge fan of sleeps.  In the non-rails world, I used to be able to do a sleep(0) to signal the system to
   # check if somebody else needed to do some work.  Testing with Rails, I find I have to actually sleep, so I do a
   # very short time like 0.01.
+
   class RedisCleaner
-    FLUSH_COMMANDS =
+    # copied from Redis::Namespace
+    COMMANDS = {
+        "append"           => [:first],
+        "auth"             => [],
+        "bgrewriteaof"     => [],
+        "bgsave"           => [],
+        "bitcount"         => [:first],
+        "bitop"            => [:exclude_first],
+        "blpop"            => [:exclude_last, :first],
+        "brpop"            => [:exclude_last, :first],
+        "brpoplpush"       => [:exclude_last],
+        "config"           => [],
+        "dbsize"           => [],
+        "debug"            => [:exclude_first],
+        "decr"             => [:first],
+        "decrby"           => [:first],
+        "del"              => [:all],
+        "discard"          => [],
+        "disconnect!"      => [],
+        "dump"             => [:first],
+        "echo"             => [],
+        "exists"           => [:first],
+        "expire"           => [:first],
+        "expireat"         => [:first],
+        "eval"             => [:eval_style],
+        "evalsha"          => [:eval_style],
+        "exec"             => [],
+        "flushall"         => [],
+        "flushdb"          => [],
+        "get"              => [:first],
+        "getbit"           => [:first],
+        "getrange"         => [:first],
+        "getset"           => [:first],
+        "hset"             => [:first],
+        "hsetnx"           => [:first],
+        "hget"             => [:first],
+        "hincrby"          => [:first],
+        "hincrbyfloat"     => [:first],
+        "hmget"            => [:first],
+        "hmset"            => [:first],
+        "hdel"             => [:first],
+        "hexists"          => [:first],
+        "hlen"             => [:first],
+        "hkeys"            => [:first],
+        "hscan"            => [:first],
+        "hscan_each"       => [:first],
+        "hvals"            => [:first],
+        "hgetall"          => [:first],
+        "incr"             => [:first],
+        "incrby"           => [:first],
+        "incrbyfloat"      => [:first],
+        "info"             => [],
+        "keys"             => [:first, :all],
+        "lastsave"         => [],
+        "lindex"           => [:first],
+        "linsert"          => [:first],
+        "llen"             => [:first],
+        "lpop"             => [:first],
+        "lpush"            => [:first],
+        "lpushx"           => [:first],
+        "lrange"           => [:first],
+        "lrem"             => [:first],
+        "lset"             => [:first],
+        "ltrim"            => [:first],
+        "mapped_hmset"     => [:first],
+        "mapped_hmget"     => [:first],
+        "mapped_mget"      => [:all, :all],
+        "mapped_mset"      => [:all],
+        "mapped_msetnx"    => [:all],
+        "mget"             => [:all],
+        "monitor"          => [:monitor],
+        "move"             => [:first],
+        "multi"            => [],
+        "mset"             => [:alternate],
+        "msetnx"           => [:alternate],
+        "object"           => [:exclude_first],
+        "persist"          => [:first],
+        "pexpire"          => [:first],
+        "pexpireat"        => [:first],
+        "pfadd"            => [:first],
+        "pfcount"          => [:all],
+        "pfmerge"          => [:all],
+        "ping"             => [],
+        "psetex"           => [:first],
+        "psubscribe"       => [:all],
+        "pttl"             => [:first],
+        "publish"          => [:first],
+        "punsubscribe"     => [:all],
+        "quit"             => [],
+        "randomkey"        => [],
+        "rename"           => [:all],
+        "renamenx"         => [:all],
+        "restore"          => [:first],
+        "rpop"             => [:first],
+        "rpoplpush"        => [:all],
+        "rpush"            => [:first],
+        "rpushx"           => [:first],
+        "sadd"             => [:first],
+        "save"             => [],
+        "scard"            => [:first],
+        "scan"             => [:scan_style, :second],
+        "scan_each"        => [:scan_style, :all],
+        "script"           => [],
+        "sdiff"            => [:all],
+        "sdiffstore"       => [:all],
+        "select"           => [],
+        "set"              => [:first],
+        "setbit"           => [:first],
+        "setex"            => [:first],
+        "setnx"            => [:first],
+        "setrange"         => [:first],
+        "shutdown"         => [],
+        "sinter"           => [:all],
+        "sinterstore"      => [:all],
+        "sismember"        => [:first],
+        "slaveof"          => [],
+        "smembers"         => [:first],
+        "smove"            => [:exclude_last],
+        "sort"             => [:sort],
+        "spop"             => [:first],
+        "srandmember"      => [:first],
+        "srem"             => [:first],
+        "sscan"            => [:first],
+        "sscan_each"       => [:first],
+        "strlen"           => [:first],
+        "subscribe"        => [:all],
+        "sunion"           => [:all],
+        "sunionstore"      => [:all],
+        "ttl"              => [:first],
+        "type"             => [:first],
+        "unsubscribe"      => [:all],
+        "unwatch"          => [:all],
+        "watch"            => [:all],
+        "zadd"             => [:first],
+        "zcard"            => [:first],
+        "zcount"           => [:first],
+        "zincrby"          => [:first],
+        "zinterstore"      => [:exclude_options],
+        "zrange"           => [:first],
+        "zrangebylex"      => [:first],
+        "zrangebyscore"    => [:first],
+        "zrank"            => [:first],
+        "zrem"             => [:first],
+        "zremrangebyrank"  => [:first],
+        "zremrangebyscore" => [:first],
+        "zremrangebylex"   => [:first],
+        "zrevrange"        => [:first],
+        "zrevrangebyscore" => [:first],
+        "zrevrangebylex"   => [:first],
+        "zrevrank"         => [:first],
+        "zscan"            => [:first],
+        "zscan_each"       => [:first],
+        "zscore"           => [:first],
+        "zunionstore"      => [:exclude_options],
+        "[]"               => [:first],
+        "[]="              => [:first]
+    }
+
+    FLUSH_COMMANDS       =
         [
             "flushall",
             "flushdb"
         ]
-    SET_COMMANDS   =
+    NUM_CHANGED_COMMANDS =
         [
             "sadd",
             "zadd",
             "srem",
             "zrem",
             "zremrangebyrank",
-            "zremrangebyscore"
+            "zremrangebyscore",
+            "zremrangebylex",
+            "hsetnx",
+            "hdel",
+            "linsert",
+            "lpushx",
+            "rpushx",
+            "lrem",
+            "mapped_msetnx",
+            "msetnx",
+            "move",
+            "persist",
+            "renamenx",
+            "sdiffstore",
+            "setnx",
+            "sinterstore",
+            "smove",
+            "sunionstore",
+            "zinterstore",
+            "zunionstore",
         ]
-    WRITE_COMMANDS =
+    NIL_FAIL_COMMANDS    =
+        [
+            "lpop",
+            "rpop",
+            "rpoplpush",
+            "spop",
+        ]
+    POP_COMMANDS         =
+        [
+            "blpop",
+            "brpop",
+        ]
+    WRITE_COMMANDS       =
         [
             "append",
             "bitop",
-            "blpop",
-            "brpop",
             "brpoplpush",
             "decr",
             "decrby",
@@ -65,57 +253,35 @@ module PseudoCleaner
             "expireat",
             "getset",
             "hset",
-            "hsetnx",
             "hincrby",
             "hincrbyfloat",
             "hmset",
-            "hdel",
             "incr",
             "incrby",
             "incrbyfloat",
-            "linsert",
-            "lpop",
             "lpush",
-            "lpushx",
-            "lrem",
             "lset",
             "ltrim",
             "mapped_hmset",
             "mapped_mset",
-            "mapped_msetnx",
-            "move",
             "mset",
-            "msetnx",
-            "persist",
             "pexpire",
             "pexpireat",
             "psetex",
             "rename",
-            "renamenx",
             "restore",
-            "rpop",
-            "rpoplpush",
             "rpush",
-            "rpushx",
-            "sdiffstore",
             "set",
             "setbit",
             "setex",
-            "setnx",
             "setrange",
-            "sinterstore",
-            "smove",
             "sort",
-            "spop",
-            "sunionstore",
             "zincrby",
-            "zinterstore",
             "[]=",
         ]
-    READ_COMMANDS  =
+    READ_COMMANDS        =
         [
             "bitcount",
-            "bitop",
             "dump",
             "exists",
             "get",
@@ -136,7 +302,6 @@ module PseudoCleaner
             "mapped_hmget",
             "mapped_mget",
             "mget",
-            "persist",
             "scard",
             "scan",
             "scan_each",
@@ -151,10 +316,13 @@ module PseudoCleaner
             "type",
             "zcard",
             "zcount",
+            "zlexcount",
             "zrange",
+            "zrangebylex",
             "zrangebyscore",
             "zrank",
             "zrevrange",
+            "zrevrangebylex",
             "zrevrangebyscore",
             "zrevrank",
             "zscan",
@@ -162,20 +330,35 @@ module PseudoCleaner
             "zscore",
             "[]",
         ]
+    ALL_COMMANDS         =
+        READ_COMMANDS +
+            FLUSH_COMMANDS +
+            NUM_CHANGED_COMMANDS +
+            NIL_FAIL_COMMANDS +
+            POP_COMMANDS +
+            WRITE_COMMANDS
 
-    attr_reader :initial_keys
+    OVERRIDE_COMMANDS =
+        {
+            "sdiffstore"  => [:first],
+            "sinterstore" => [:first],
+            "zinterstore" => [:first],
+            "sunionstore" => [:first],
+            "zunionstore" => [:first],
+        }
     attr_accessor :options
 
     def initialize(start_method, end_method, table, options)
-      @initial_keys       = SortedSet.new
-      @monitor_thread     = nil
-      @redis_name         = nil
-      @suite_altered_keys = SortedSet.new
-      @updated_keys       = SortedSet.new
-      @multi_commands     = []
-      @in_multi           = false
-      @in_redis_cleanup   = false
-      @suspend_tracking   = false
+      @redis      = table
+      @redis_name = nil
+
+      clear_set :@initial_keys
+      clear_set :@suite_altered_keys
+      clear_set :@updated_keys
+      clear_list_array :@multi_commands
+      set_value_bool :@in_multi, false
+      set_value_bool :@in_redis_cleanup, false
+      set_value_bool :@suspend_tracking, false
 
       unless PseudoCleaner::MasterCleaner::VALID_START_METHODS.include?(start_method)
         raise "You must specify a valid start function from: #{PseudoCleaner::MasterCleaner::VALID_START_METHODS}."
@@ -190,8 +373,6 @@ module PseudoCleaner
       @options[:table_end_method]   ||= end_method
       @options[:output_diagnostics] ||= PseudoCleaner::Configuration.current_instance.output_diagnostics ||
           PseudoCleaner::Configuration.current_instance.post_transaction_analysis
-
-      @redis = table
     end
 
     # Ruby defines a now deprecated type method so we need to override it here
@@ -207,25 +388,30 @@ module PseudoCleaner
       super or respond_to_missing?(command, include_private)
     end
 
-    def updated_keys
-      @updated_keys ||= SortedSet.new
-    end
-
     def method_missing(command, *args, &block)
       normalized_command = command.to_s.downcase
 
       if redis.respond_to?(normalized_command)
         if (normalized_command == "pipelined" ||
             (normalized_command == "multi" && block)) &&
-            !@suspend_tracking
-          @in_multi          = true
+            !get_value_bool(:@suspend_tracking)
+          set_value_bool :@in_multi, true
           normalized_command = "exec"
+        end
+
+        initial_keys = nil
+        if FLUSH_COMMANDS.include?(normalized_command)
+          initial_keys = get_set(:@initial_keys)
         end
 
         response = redis.send(command, *args, &block)
 
-        if @in_multi && !(["exec", "discard"].include?(normalized_command))
-          @multi_commands << [normalized_command, *args]
+        if FLUSH_COMMANDS.include?(normalized_command)
+          add_set_values :@updated_keys, *initial_keys.to_a
+        end
+
+        if get_value_bool(:@in_multi) && !(["exec", "discard"].include?(normalized_command))
+          append_list_value_array :@multi_commands, [normalized_command, *args]
         else
           process_command(response, normalized_command, *args)
         end
@@ -237,14 +423,15 @@ module PseudoCleaner
     end
 
     def process_command(response, *args)
-      unless @in_redis_cleanup || @suspend_tracking
+      unless get_value_bool(:@in_redis_cleanup) || get_value_bool(:@suspend_tracking)
         if "multi" == args[0]
-          @in_multi       = true
-          @multi_commands = []
+          set_value_bool :@in_multi, true
+          clear_list_array :@multi_commands
         elsif ["exec", "pipelined"].include?(args[0])
           begin
-            if (!response && @multi_commands.length > 0) || (response && response.length != @multi_commands.length)
-              puts "exec response does not match sent commands.\n  response: #{response}\n  commands: #{@multi_commands}"
+            if (!response && get_list_length(:@multi_commands) > 0) ||
+                (response && response.length != get_list_length(:@multi_commands))
+              puts "exec response does not match sent commands.\n  response: #{response}\n  commands: #{get_list_array(:@multi_commands)}"
 
               # make the response length match the commands length.
               # so far the only time this has happened was when a multi returned nil which SHOULD indicate a failure
@@ -253,26 +440,26 @@ module PseudoCleaner
               # to assume that redis DID change and record it as such.  Even if I am wrong, for the cleaner, it
               # doesn't matter, and there is no harm.
               response ||= []
-              @multi_commands.each_with_index do |command, index|
+              get_list_array(:@multi_commands).each_with_index do |command, index|
                 if response.length < index
                   response << true
                 end
               end
             end
 
-            @multi_commands.each_with_index do |command, index|
+            get_list_array(:@multi_commands).each_with_index do |command, index|
               process_command(response[index], *command)
             end
           ensure
-            @in_multi       = false
-            @multi_commands = []
+            set_value_bool :@in_multi, false
+            clear_list_array :@multi_commands
           end
         elsif "discard" == args[0]
-          @in_multi       = false
-          @multi_commands = []
+          set_value_bool :@in_multi, false
+          clear_list_array :@multi_commands
         elsif WRITE_COMMANDS.include?(args[0])
-          updated_keys.merge(extract_keys(*args))
-        elsif SET_COMMANDS.include?(args[0])
+          add_set_values :@updated_keys, *extract_keys(*args)
+        elsif NUM_CHANGED_COMMANDS.include?(args[0])
           update_key = true
           if [true, false].include?(response)
             update_key = response
@@ -281,14 +468,22 @@ module PseudoCleaner
           end
 
           if update_key
-            updated_keys.merge(extract_keys(*args))
+            add_set_values :@updated_keys, extract_keys(*args)
+          end
+        elsif POP_COMMANDS.include?(args[0])
+          if response
+            add_set_value :@updated_keys, response[0]
+          end
+        elsif NIL_FAIL_COMMANDS.include?(args[0])
+          if response
+            add_set_values :@updated_keys, extract_keys(*args)
           end
         end
       end
     end
 
     def respond_to_missing?(command, include_all=false)
-      return true if WRITE_COMMANDS.include?(command.to_s.downcase)
+      return true if ALL_COMMANDS.include?(command.to_s.downcase)
 
       # blind passthrough is deprecated and will be removed in 2.0
       if redis.respond_to?(command, include_all)
@@ -298,30 +493,50 @@ module PseudoCleaner
       defined?(super) && super
     end
 
+    def extract_key(arg)
+      if arg.is_a?(Array)
+        arg
+      elsif arg.is_a?(Hash)
+        arg.keys
+      else
+        [arg]
+      end
+    end
+
     def extract_keys(command, *args)
-      handling     = Redis::Namespace::COMMANDS[command.to_s.downcase]
+      handling     = OVERRIDE_COMMANDS[command.to_s.downcase] || PseudoCleaner::RedisCleaner::COMMANDS[command.to_s.downcase]
       message_keys = []
 
       (before, after) = handling
 
       case before
         when :first
-          message_keys << args[0] if args[0]
+          if args[0]
+            extract_key(args[0]).each do |key|
+              message_keys << key
+            end
+          end
 
         when :all
           args.each do |arg|
-            message_keys << arg
+            extract_key(arg).each do |key|
+              message_keys << key
+            end
           end
 
         when :exclude_first
           args.each do |arg|
-            message_keys << arg
+            extract_key(arg).each do |key|
+              message_keys << key
+            end
           end
           message_keys.shift
 
         when :exclude_last
           args.each do |arg|
-            message_keys << arg
+            extract_key(arg).each do |key|
+              message_keys << key
+            end
           end
           message_keys.pop unless message_keys.length == 1
 
@@ -332,13 +547,17 @@ module PseudoCleaner
 
         when :alternate
           args.each_with_index do |arg, i|
-            message_keys << arg if i.even?
+            if i.even?
+              extract_key(arg).each do |key|
+                message_keys << key
+              end
+            end
           end
 
         when :sort
           if args[-1].is_a?(Hash)
-            if args[1][:store]
-              message_keys << args[1][:store]
+            if args[-1][:store] || args[-1]["store"]
+              message_keys << (args[-1][:store] || args[-1]["store"])
             end
           end
 
@@ -375,8 +594,6 @@ module PseudoCleaner
       time = Benchmark.measure do
         puts "  RedisCleaner(#{redis_name})" if PseudoCleaner::Configuration.instance.benchmark
 
-        @test_strategy ||= test_strategy
-
         start_monitor
       end
 
@@ -385,17 +602,15 @@ module PseudoCleaner
 
     def suspend_tracking(&block)
       begin
-        @suspend_tracking = true
+        set_value_bool :@suspend_tracking, true
 
         block.yield
       ensure
-        @suspend_tracking = false
+        set_value_bool :@suspend_tracking, false
       end
     end
 
     def test_start test_strategy
-      @test_strategy ||= test_strategy
-
       time = Benchmark.measure do
         puts "  RedisCleaner(#{redis_name})" if PseudoCleaner::Configuration.instance.benchmark
 
@@ -404,12 +619,12 @@ module PseudoCleaner
             report_dirty_values "values altered before the test started", test_values
 
             test_values.each do |value|
-              redis.del value unless initial_keys.include?(value)
+              redis.del value unless set_includes?(:@initial_keys, value)
             end
           end
         end
 
-        @updated_keys = SortedSet.new
+        clear_set :@updated_keys
       end
 
       puts "  RedisCleaner(#{redis_name}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
@@ -428,9 +643,9 @@ module PseudoCleaner
             end
 
             updated_values.each do |value|
-              if initial_keys.include?(value)
+              if set_includes?(:@initial_keys, value)
                 report_keys << value
-                @suite_altered_keys << value unless ignore_key(value)
+                add_set_value(:@suite_altered_keys, value) unless ignore_key(value)
               else
                 redis.del(value)
               end
@@ -440,7 +655,7 @@ module PseudoCleaner
           end
         end
 
-        @updated_keys = SortedSet.new
+        clear_set :@updated_keys
       end
 
       puts "  RedisCleaner(#{redis_name}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
@@ -450,7 +665,11 @@ module PseudoCleaner
       time = Benchmark.measure do
         puts "  RedisCleaner(#{redis_name})" if PseudoCleaner::Configuration.instance.benchmark
 
-        report_end_of_suite_state "suite end"
+        new_keys = report_end_of_suite_state "suite end"
+
+        new_keys.each do |key_value|
+          redis.del key_value
+        end
       end
 
       puts "  RedisCleaner(#{redis_name}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
@@ -544,64 +763,70 @@ module PseudoCleaner
     def report_end_of_suite_state report_reason
       current_keys = SortedSet.new(redis.keys)
 
-      deleted_keys = initial_keys - current_keys
-      new_keys     = current_keys - initial_keys
+      initial_key_set = get_set(:@initial_keys)
+
+      deleted_keys = initial_key_set - current_keys
+      new_keys     = current_keys - initial_key_set
 
       # filter out values we inserted that will go away on their own.
       new_keys     = new_keys.select { |key| (key =~ /redis_cleaner::synchronization_(?:end_)?key_[0-9]+_[0-9]+/).nil? }
 
       report_dirty_values "new values as of #{report_reason}", new_keys
       report_dirty_values "values deleted before #{report_reason}", deleted_keys
-      report_dirty_values "initial values changed during suite run", @suite_altered_keys
+      report_dirty_values "initial values changed during suite run", get_set(:@suite_altered_keys)
 
-      @suite_altered_keys = SortedSet.new
+      clear_set :@suite_altered_keys
 
-      new_keys.each do |key_value|
-        redis.del key_value
-      end
+      new_keys
     end
 
     def synchronize_test_values(&block)
-      if @in_multi
+      if get_value_bool(:@in_multi)
         # Ideally we should never get here, but if we do, assume everything was changed and keep moving...
-        @multi_commands.each do |args|
-          if WRITE_COMMANDS.include?(args[0])
-            updated_keys.merge(extract_keys(*args))
-          elsif SET_COMMANDS.include?(args[0])
-            updated_keys.merge(extract_keys(*args))
+        get_list_array(:@multi_commands).each do |args|
+          if WRITE_COMMANDS.include?(args[0]) ||
+              POP_COMMANDS.include?(args[0]) ||
+              NIL_FAIL_COMMANDS.include?(args[0]) ||
+              NUM_CHANGED_COMMANDS.include?(args[0])
+            add_set_values :@updated_keys, extract_keys(*args)
           end
         end
 
-        @in_multi       = false
-        @multi_commands = []
+        set_value_bool(:@in_multi, false)
+        clear_list_array(:@multi_commands)
       end
 
-      updated_values = updated_keys.dup
+      updated_values = get_set(:@updated_keys).dup
 
-      @in_redis_cleanup = true
+      set_value_bool :@in_redis_cleanup, true
 
       begin
         block.yield updated_values
       ensure
-        @in_redis_cleanup = false
+        set_value_bool :@in_redis_cleanup, false
       end
     end
 
     def start_monitor
-      cleaner_class = self
-
-      @initial_keys = SortedSet.new(redis.keys)
+      redis_keys = redis.keys
+      clear_set :@initial_keys, redis_keys
+      clear_set :@suite_altered_keys
+      clear_set :@updated_keys
+      clear_list_array :@multi_commands
+      set_value_bool :@in_multi, false
+      set_value_bool :@in_redis_cleanup, false
+      set_value_bool :@suspend_tracking, false
 
       if @options[:output_diagnostics]
         if PseudoCleaner::MasterCleaner.report_table
           Cornucopia::Util::ReportTable.new(nested_table:         PseudoCleaner::MasterCleaner.report_table,
                                             nested_table_label:   redis_name,
                                             suppress_blank_table: true) do |report_table|
-            report_table.write_stats "initial keys count", @initial_keys.count
+            report_table.write_stats "initial keys count", redis_keys.count
           end
         else
           PseudoCleaner::Logger.write("#{redis_name}")
-          PseudoCleaner::Logger.write("    Initial keys count - #{@initial_keys.count}")
+          PseudoCleaner::Logger.write("    Initial keys count - #{redis_keys.count}")
         end
       end
     end
@@ -614,11 +839,16 @@ module PseudoCleaner
         when "list"
           key_hash[:list] = { len: redis.llen(key_name), values: redis.lrange(key_name, 0, -1) }
         when "set"
-          key_hash[:set] = redis.smembers(key_name)
+          key_hash[:set] = { len: redis.scard(key_name), values: redis.smembers(key_name) }
         when "zset"
-          key_hash[:sorted_set] = redis.smembers(key_name)
+          sorted_set_values = redis.zrange(key_name, 0, -1).reduce({}) do |hash, set_value|
+            hash[set_value] = redis.zscore(key_name, set_value)
+            hash
+          end
+
+          key_hash[:sorted_set] = { len: redis.zcard(key_name), values: sorted_set_values }
         when "hash"
-          key_hash[:list] = { len: redis.hlen(key_name), values: redis.hgetall(key_name) }
+          key_hash[:hash] = { len: redis.hlen(key_name), values: redis.hgetall(key_name) }
       end
 
       if key_hash[:value].nil? &&
@@ -649,9 +879,9 @@ module PseudoCleaner
             end
           end
         else
-          PseudoCleaner::Logger.write("********* RedisCleaner - #{message}".red.on_light_white)
           test_values.each do |key_name|
             unless ignore_key(key_name)
+              PseudoCleaner::Logger.write("********* RedisCleaner - #{message}".red.on_light_white) unless output_values
               output_values = true
               PseudoCleaner::Logger.write("  #{key_name}: #{report_record(key_name)}".red.on_light_white)
             end
@@ -660,6 +890,74 @@ module PseudoCleaner
 
         PseudoCleaner::MasterCleaner.report_error if output_values
       end
+    end
+
+    def set_value_bool(value_name, bool_value)
+      instance_variable_set(value_name, bool_value)
+    end
+
+    def get_value_bool(value_name)
+      instance_variable_get(value_name)
+    end
+
+    def append_list_value_array(value_name, array_value)
+      array = instance_variable_get(value_name)
+      array << array_value
+    end
+
+    def get_list_length(value_name)
+      instance_variable_get(value_name).length
+    end
+
+    def get_list_array(value_name)
+      instance_variable_get(value_name)
+    end
+
+    def clear_list_array(value_name)
+      instance_variable_set(value_name, [])
+    end
+
+    def clear_set(value_name, keys = nil)
+      if keys
+        instance_variable_set(value_name, SortedSet.new(keys))
+      else
+        instance_variable_set(value_name, SortedSet.new)
+      end
+    end
+
+    def add_set_values(value_name, *values)
+      set = get_set(value_name)
+
+      set.merge(*values)
+    end
+
+    def add_set_value(value_name, value)
+      set = get_set(value_name)
+
+      set << value
+    end
+
+    def remove_set_value(value_name, value)
+      set = get_set(value_name)
+
+      set.delete value
+    end
+
+    def set_includes?(value_name, value)
+      set = get_set(value_name)
+
+      set.include?(value)
+    end
+
+    def get_set(value_name)
+      set = instance_variable_get(value_name)
+
+      unless set
+        set = SortedSet.new
+        instance_variable_set(value_name, set)
+      end
+
+      set
     end
   end
 end
