@@ -468,7 +468,7 @@ module PseudoCleaner
           end
 
           if update_key
-            add_set_values :@updated_keys, extract_keys(*args)
+            add_set_values :@updated_keys, *extract_keys(*args)
           end
         elsif POP_COMMANDS.include?(args[0])
           if response
@@ -476,7 +476,7 @@ module PseudoCleaner
           end
         elsif NIL_FAIL_COMMANDS.include?(args[0])
           if response
-            add_set_values :@updated_keys, extract_keys(*args)
+            add_set_values :@updated_keys, *extract_keys(*args)
           end
         end
       end
@@ -788,7 +788,7 @@ module PseudoCleaner
               POP_COMMANDS.include?(args[0]) ||
               NIL_FAIL_COMMANDS.include?(args[0]) ||
               NUM_CHANGED_COMMANDS.include?(args[0])
-            add_set_values :@updated_keys, extract_keys(*args)
+            add_set_values :@updated_keys, *extract_keys(*args)
           end
         end
 

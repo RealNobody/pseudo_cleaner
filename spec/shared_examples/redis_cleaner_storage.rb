@@ -50,7 +50,9 @@ RSpec.shared_examples("it stores and retrieves values for RedisCleaner") do
 
   describe "boolean functions" do
     after(:each) do
-      server_subject.redis.del server_subject.bool_name(value_name)
+      if server_subject.respond_to?(:bool_name)
+        server_subject.redis.del server_subject.bool_name(value_name)
+      end
     end
 
     it "can write then read a true value" do
