@@ -928,7 +928,7 @@ module PseudoCleaner
     def add_set_values(value_name, *values)
       set = get_set(value_name)
 
-      set.merge(*values)
+      set.merge(values)
     end
 
     def add_set_value(value_name, value)
