@@ -355,6 +355,7 @@ module PseudoCleaner
       clear_set :@initial_keys
       clear_set :@suite_altered_keys
       clear_set :@updated_keys
+      clear_set :@read_keys
       clear_list_array :@multi_commands
       set_value_bool :@in_multi, false
       set_value_bool :@in_redis_cleanup, false
@@ -477,6 +478,10 @@ module PseudoCleaner
         elsif NIL_FAIL_COMMANDS.include?(args[0])
           if response
             add_set_values :@updated_keys, *extract_keys(*args)
+          end
+        elsif track_reads && READ_COMMANDS.include?(args[0])
+          extract_keys(*args).each do |value|
+            add_set_value :@read_keys, "\"#{value}\" - \"#{response}\""
           end
         end
       end
@@ -614,9 +619,10 @@ module PseudoCleaner
       time = Benchmark.measure do
         puts "  RedisCleaner(#{redis_name})" if PseudoCleaner::Configuration.instance.benchmark
 
-        synchronize_test_values do |test_values|
-          if test_values && !test_values.empty?
+        synchronize_test_values do |test_values, read_values|
+          if (test_values && !test_values.empty?) || (read_values && !read_values.empty?)
             report_dirty_values "values altered before the test started", test_values
+            report_dirty_values "values read before the test started", read_values if track_reads
 
             test_values.each do |value|
               redis.del value unless set_includes?(:@initial_keys, value)
@@ -625,6 +631,7 @@ module PseudoCleaner
         end
 
         clear_set :@updated_keys
+        clear_set :@read_keys
       end
 
       puts "  RedisCleaner(#{redis_name}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
@@ -634,12 +641,13 @@ module PseudoCleaner
       time = Benchmark.measure do
         puts "  RedisCleaner(#{redis_name})" if PseudoCleaner::Configuration.instance.benchmark
 
-        synchronize_test_values do |updated_values|
-          if updated_values && !updated_values.empty?
+        synchronize_test_values do |updated_values, read_values|
+          if (updated_values && !updated_values.empty?) || (read_values && !read_values.empty?)
             report_keys = []
 
             if @options[:output_diagnostics]
               report_dirty_values "updated values", updated_values
+              report_dirty_values "read values", read_values if track_reads
             end
 
             updated_values.each do |value|
@@ -656,6 +664,7 @@ module PseudoCleaner
         end
 
         clear_set :@updated_keys
+        clear_set :@read_keys
       end
 
       puts "  RedisCleaner(#{redis_name}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
@@ -708,7 +717,7 @@ module PseudoCleaner
       time = Benchmark.measure do
         puts "  RedisCleaner(#{redis_name})" if PseudoCleaner::Configuration.instance.benchmark
 
-        synchronize_test_values do |updated_values|
+        synchronize_test_values do |updated_values, read_values|
           if updated_values && !updated_values.empty?
             updated_values.each do |updated_value|
               unless ignore_key(updated_value)
@@ -726,18 +735,37 @@ module PseudoCleaner
       time = Benchmark.measure do
         puts "  RedisCleaner(#{redis_name})" if PseudoCleaner::Configuration.instance.benchmark
 
-        synchronize_test_values do |updated_values|
-          if updated_values && !updated_values.empty?
+        synchronize_test_values do |updated_values, read_values|
+          if (updated_values && !updated_values.empty?) || (read_values && !read_values.empty?)
             output_values = false
 
+            updated_values = updated_values.select { |value| !ignore_key(value) }
+            read_values    = read_values.select { |value| !ignore_key(value) }
             if PseudoCleaner::MasterCleaner.report_table
               Cornucopia::Util::ReportTable.new(nested_table:         PseudoCleaner::MasterCleaner.report_table,
                                                 nested_table_label:   redis_name,
                                                 suppress_blank_table: true) do |report_table|
                 updated_values.each_with_index do |updated_value, index|
+                  updated_value, read_value = split_read_values(updated_value)
                   unless ignore_key(updated_value)
                     output_values = true
                     report_table.write_stats index.to_s, report_record(updated_value)
+                    report_table.write_stats "", read_value if read_value
+                  end
+                end
+              end
+
+              if track_reads
+                Cornucopia::Util::ReportTable.new(nested_table:         PseudoCleaner::MasterCleaner.report_table,
+                                                  nested_table_label:   "#{redis_name} - reads",
+                                                  suppress_blank_table: true) do |report_table|
+                  read_values.each_with_index do |updated_value, index|
+                    updated_value, read_value = split_read_values(updated_value)
+                    unless ignore_key(updated_value)
+                      output_values = true
+                      report_table.write_stats index.to_s, report_record(updated_value)
+                      report_table.write_stats "", read_value if read_value
+                    end
                   end
                 end
               end
@@ -745,9 +773,24 @@ module PseudoCleaner
               PseudoCleaner::Logger.write("  #{redis_name}")
 
               updated_values.each_with_index do |updated_value, index|
+                updated_value, read_value = split_read_values(updated_value)
                 unless ignore_key(updated_value)
                   output_values = true
                   PseudoCleaner::Logger.write("    #{index}: #{report_record(updated_value)}")
+                  PseudoCleaner::Logger.write("       #{read_value}") if read_value
+                end
+              end
+
+              if track_reads
+                PseudoCleaner::Logger.write("  #{redis_name} - reads")
+
+                read_values.each_with_index do |updated_value, index|
+                  updated_value, read_value = split_read_values(updated_value)
+                  unless ignore_key(updated_value)
+                    output_values = true
+                    PseudoCleaner::Logger.write("    #{index}: #{report_record(updated_value)}")
+                    PseudoCleaner::Logger.write("       #{read_value}") if read_value
+                  end
                 end
               end
             end
@@ -789,6 +832,8 @@ module PseudoCleaner
               NIL_FAIL_COMMANDS.include?(args[0]) ||
               NUM_CHANGED_COMMANDS.include?(args[0])
             add_set_values :@updated_keys, *extract_keys(*args)
+          elsif track_reads && READ_COMMANDS.include?(args[0])
+            add_set_values :@read_keys, *extract_keys(*args)
           end
         end
 
@@ -797,11 +842,12 @@ module PseudoCleaner
       end
 
       updated_values = get_set(:@updated_keys).dup
+      read_values    = get_set(:@read_keys).dup
 
       set_value_bool :@in_redis_cleanup, true
 
       begin
-        block.yield updated_values
+        block.yield updated_values, read_values
       ensure
         set_value_bool :@in_redis_cleanup, false
       end
@@ -812,6 +858,7 @@ module PseudoCleaner
       clear_set :@initial_keys, redis_keys
       clear_set :@suite_altered_keys
       clear_set :@updated_keys
+      clear_set :@read_keys
       clear_list_array :@multi_commands
       set_value_bool :@in_multi, false
       set_value_bool :@in_redis_cleanup, false
@@ -862,7 +909,18 @@ module PseudoCleaner
       key_hash
     end
 
+    def split_read_values(key)
+      if key =~ /\".*\" - \".*\"/
+        vals = key.split("\" - \"")
+        [vals[0][1..-1], vals[1..-1].join("\" - \"")[0..-2]]
+      else
+        [key, nil]
+      end
+    end
+
     def report_dirty_values message, test_values
+      test_values = test_values.select { |value| !ignore_key(split_read_values(value)[0]) }
+
       if test_values && !test_values.empty?
         output_values = false
 
@@ -872,18 +930,22 @@ module PseudoCleaner
                                             suppress_blank_table: true) do |report_table|
             report_table.write_stats "action", message
             test_values.each_with_index do |key_name, index|
+              key_name, read_value = split_read_values(key_name)
               unless ignore_key(key_name)
                 output_values = true
                 report_table.write_stats index, report_record(key_name)
+                report_table.write_stats("", read_value) if read_value
               end
             end
           end
         else
           test_values.each do |key_name|
+            key_name, read_value = split_read_values(key_name)
             unless ignore_key(key_name)
               PseudoCleaner::Logger.write("********* RedisCleaner - #{message}".red.on_light_white) unless output_values
               output_values = true
               PseudoCleaner::Logger.write("  #{key_name}: #{report_record(key_name)}".red.on_light_white)
+              PseudoCleaner::Logger.write("     #{read_value}".red.on_light_white) if read_value
             end
           end
         end
@@ -958,6 +1020,14 @@ module PseudoCleaner
       end
 
       set
+    end
+
+    def track_reads=(value)
+      @track_reads = value
+    end
+
+    def track_reads
+      @track_reads ||= PseudoCleaner::Configuration.instance.redis_track_reads
     end
   end
 end

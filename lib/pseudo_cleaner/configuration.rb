@@ -20,6 +20,7 @@ module PseudoCleaner
     attr_accessor :enable_full_data_dump_tag
     attr_accessor :disable_cornucopia_output
     attr_accessor :benchmark
+    attr_accessor :redis_track_reads
 
     def self.current_instance
       self.instance
@@ -37,6 +38,7 @@ module PseudoCleaner
       @enable_full_data_dump_tag   = true
       @disable_cornucopia_output   = false
       @benchmark                   = false
+      @redis_track_reads           = false
     end
 
     # Backwards comaptibility...
