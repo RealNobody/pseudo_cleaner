@@ -355,7 +355,7 @@ module PseudoCleaner
       clear_set :@initial_keys
       clear_set :@suite_altered_keys
       clear_set :@updated_keys
-      clear_set :@read_keys
+      clear_list_array :@read_keys
       clear_list_array :@multi_commands
       set_value_bool :@in_multi, false
       set_value_bool :@in_redis_cleanup, false
@@ -480,9 +480,14 @@ module PseudoCleaner
             add_set_values :@updated_keys, *extract_keys(*args)
           end
         elsif track_reads && READ_COMMANDS.include?(args[0])
-          extract_keys(*args).each do |value|
-            add_set_value :@read_keys, "\"#{value}\" - \"#{response}\""
-          end
+          keys = extract_keys(*args)
+          append_list_value_array(:@read_keys,
+                                  [
+                                      keys.length,
+                                      *keys,
+                                      response.to_s.encode('UTF-8', invalid: :replace, undef: :replace, replace: '')
+                                  ]
+          )
         end
       end
     end
@@ -631,7 +636,7 @@ module PseudoCleaner
         end
 
         clear_set :@updated_keys
-        clear_set :@read_keys
+        clear_list_array :@read_keys
       end
 
       puts "  RedisCleaner(#{redis_name}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
@@ -664,7 +669,7 @@ module PseudoCleaner
         end
 
         clear_set :@updated_keys
-        clear_set :@read_keys
+        clear_list_array :@read_keys
       end
 
       puts "  RedisCleaner(#{redis_name}) time: #{time}" if PseudoCleaner::Configuration.instance.benchmark
@@ -739,8 +744,15 @@ module PseudoCleaner
           if (updated_values && !updated_values.empty?) || (read_values && !read_values.empty?)
             output_values = false
 
-            updated_values = updated_values.select { |value| !ignore_key(value) }
-            read_values    = read_values.select { |value| !ignore_key(value) }
+            updated_values = updated_values.select do |value|
+              value, read_value = split_read_values(value)
+              !ignore_key(value)
+            end
+            read_values    = read_values.select do |value|
+              value, read_value = split_read_values(value)
+              !ignore_key(value)
+            end
+
             if PseudoCleaner::MasterCleaner.report_table
               Cornucopia::Util::ReportTable.new(nested_table:         PseudoCleaner::MasterCleaner.report_table,
                                                 nested_table_label:   redis_name,
@@ -833,7 +845,8 @@ module PseudoCleaner
               NUM_CHANGED_COMMANDS.include?(args[0])
             add_set_values :@updated_keys, *extract_keys(*args)
           elsif track_reads && READ_COMMANDS.include?(args[0])
-            add_set_values :@read_keys, *extract_keys(*args)
+            keys = *extract_keys(*args)
+            append_list_value_array :@read_keys, [keys.length, *keys, response]
           end
         end
 
@@ -842,8 +855,20 @@ module PseudoCleaner
       end
 
       updated_values = get_set(:@updated_keys).dup
-      read_values    = get_set(:@read_keys).dup
+      read_values    = get_list_array(:@read_keys)
 
+      read_values = read_values.reduce([]) do |array, values|
+        if values.length > values[0].to_i + 1
+          read_value  = values[-1]
+          values = values[1..-2].map { |value| [value, read_value] }
+        else
+          values = values[1..-1]
+        end
+
+        array.concat values
+
+        array
+      end
       set_value_bool :@in_redis_cleanup, true
 
       begin
@@ -858,7 +883,7 @@ module PseudoCleaner
       clear_set :@initial_keys, redis_keys
       clear_set :@suite_altered_keys
       clear_set :@updated_keys
-      clear_set :@read_keys
+      clear_list_array :@read_keys
       clear_list_array :@multi_commands
       set_value_bool :@in_multi, false
       set_value_bool :@in_redis_cleanup, false
@@ -910,12 +935,10 @@ module PseudoCleaner
     end
 
     def split_read_values(key)
-      if key =~ /\".*\" - \".*\"/
-        vals = key.split("\" - \"")
-        [vals[0][1..-1], vals[1..-1].join("\" - \"")[0..-2]]
-      else
-        [key, nil]
-      end
+      split = Array.wrap(key)
+      split << nil if split.length < 2
+
+      split
     end
 
     def report_dirty_values message, test_values
